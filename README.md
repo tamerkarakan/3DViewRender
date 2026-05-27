@@ -15,8 +15,11 @@ Inputs:
 - `renderer_backend`: `cpu_preview`, `f3d_optional`, `blender_optional`, or `nvdiffrast_optional`
 - `camera_mode`: `orthographic` or `perspective`
 - `up_axis`: model vertical axis, `z_up` by default; switch to `y_up` for Y-up assets
+- `matrix_layout`: single-image matrix layout, `3x2` by default for six sides
+- `label_matrix`: draw each side name in the top-left corner of its matrix tile using Pillow
+- `save_to_output`: save side PNGs plus the matrix PNG directly into ComfyUI's output folder
 - `front`, `back`, `left`, `right`, `top`, `bottom`: side selection toggles
-- advanced controls: `auto_install_f3d`, `blender_path`, `max_faces`, `background_color`, `mesh_color`, `fov_degrees`, `orthographic_scale`, `camera_distance`, `shading`
+- advanced controls: `auto_install_f3d`, `blender_path`, `filename_prefix`, `max_faces`, `background_color`, `mesh_color`, `fov_degrees`, `orthographic_scale`, `camera_distance`, `shading`
 
 `max_faces` defaults to `10000` because the fallback renderer is a CPU rasterizer. Large generated meshes can contain millions of triangles; this cap keeps ComfyUI responsive. Set it to `0` only for small meshes when full triangle coverage is required.
 
@@ -29,10 +32,11 @@ Inputs:
 Outputs:
 
 - `images`: ComfyUI `IMAGE` batch in selected side order for each mesh batch item
-- `view_names`: newline-separated labels such as `0:front`
+- `view_names`: newline-separated labels such as `front`, `back`, `left`
 - `render_info`: renderer/backend details, camera mode, model up axis, resolution, and selected views
+- `contact_sheet`: one labeled matrix image containing the selected views
 
-The same `render_info` text is also returned as a ComfyUI frontend `ui.text` payload so it can be seen in the node result panel after execution without wiring an extra text preview node.
+The same `render_info` text is also returned as a ComfyUI frontend `ui.text` payload so it can be seen in the node result panel after execution without wiring an extra text preview node. With `save_to_output` enabled, the frontend result also contains side-named output images and the matrix image.
 
 ## Tests
 

@@ -15,6 +15,8 @@ except ImportError:
 try:
     from .renderer import (
         CameraMode,
+        ContactSheetBuilder,
+        ContactSheetSettings,
         MeshBatchItem,
         MeshRenderer,
         NvdiffrastRenderer,
@@ -26,6 +28,8 @@ try:
 except ImportError:  # Allows running tests from this directory without package install.
     from renderer import (  # type: ignore
         CameraMode,
+        ContactSheetBuilder,
+        ContactSheetSettings,
         MeshBatchItem,
         MeshRenderer,
         NvdiffrastRenderer,
@@ -63,6 +67,7 @@ CATEGORY = "3d/render"
 CAMERA_MODES = [CameraMode.ORTHOGRAPHIC.value, CameraMode.PERSPECTIVE.value]
 RENDERER_BACKENDS = ["cpu_preview", "f3d_optional", "blender_optional", "nvdiffrast_optional"]
 UP_AXES = ["z_up", "y_up"]
+MATRIX_LAYOUTS = ["3x2", "2x3", "6x1", "1x6", "auto"]
 MODEL_INPUT_TYPES = (
     "MESH",
     "TRIMESH",
@@ -128,11 +133,15 @@ def _render(
     background_color: str,
     mesh_color: str,
     up_axis: str,
+    matrix_layout: str,
+    label_matrix: bool,
+    save_to_output: bool,
+    filename_prefix: str,
     fov_degrees: float,
     orthographic_scale: float,
     camera_distance: float,
     shading: bool,
-) -> tuple[Any, str, str]:
+) -> tuple[Any, str, str, Any, dict[str, Any]]:
     settings = _build_settings(
         resolution=resolution,
         camera_mode=camera_mode,
@@ -153,6 +162,10 @@ def _render(
             renderer_backend=renderer_backend,
             auto_install_f3d=auto_install_f3d,
             blender_path=blender_path,
+            matrix_layout=matrix_layout,
+            label_matrix=label_matrix,
+            save_to_output=save_to_output,
+            filename_prefix=filename_prefix,
         )
 
     if renderer_backend == "nvdiffrast_optional":
@@ -165,27 +178,30 @@ def _render(
         raise ValueError(f"Unknown renderer backend: {renderer_backend}")
 
     images: list[np.ndarray] = []
-    labels: list[str] = []
-    for batch_index, item in enumerate(_mesh_batch_items(model, max_faces=mesh_max_faces)):
+    label_views: list[tuple[int, str]] = []
+    items = _mesh_batch_items(model, max_faces=mesh_max_faces)
+    batch_count = len(items)
+    for batch_index, item in enumerate(items):
         for rendered in renderer.render_views(item, views, settings):
             images.append(rendered.image.astype(np.float32, copy=False))
-            labels.append(f"{batch_index}:{rendered.name}")
+            label_views.append((batch_index, rendered.name))
 
     if not images:
         raise ValueError("No renderable mesh items were found.")
 
-    try:
-        import torch
-    except Exception as exc:
-        raise RuntimeError("ComfyUI torch runtime is required to return IMAGE tensors.") from exc
-
-    render_info = _format_render_info(
+    labels = [_view_output_name(batch_index, batch_count, view) for batch_index, view in label_views]
+    return _finalize_render(
+        images=images,
+        labels=labels,
         renderer_backend=renderer_backend,
         settings=settings,
         views=views,
         max_faces=max_faces if renderer_backend == "cpu_preview" else 0,
+        matrix_layout=matrix_layout,
+        label_matrix=label_matrix,
+        save_to_output=save_to_output,
+        filename_prefix=filename_prefix,
     )
-    return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels), render_info
 
 
 def _render_external(
@@ -196,12 +212,11 @@ def _render_external(
     renderer_backend: str,
     auto_install_f3d: bool,
     blender_path: str,
-) -> tuple[Any, str, str]:
-    try:
-        import torch
-    except Exception as exc:
-        raise RuntimeError("ComfyUI torch runtime is required to return IMAGE tensors.") from exc
-
+    matrix_layout: str,
+    label_matrix: bool,
+    save_to_output: bool,
+    filename_prefix: str,
+) -> tuple[Any, str, str, Any, dict[str, Any]]:
     paths, cleanup = _external_model_paths(model)
     try:
         if renderer_backend == "f3d_optional":
@@ -214,24 +229,83 @@ def _render_external(
             raise ValueError(f"Unknown external renderer backend: {renderer_backend}")
 
         images: list[np.ndarray] = []
-        labels: list[str] = []
+        label_views: list[tuple[int, str]] = []
+        batch_count = len(paths)
         for batch_index, path in enumerate(paths):
             for rendered in renderer.render_file_views(path, views, settings):
                 images.append(rendered.image.astype(np.float32, copy=False))
-                labels.append(f"{batch_index}:{rendered.name}")
+                label_views.append((batch_index, rendered.name))
         if not images:
             raise ValueError("No renderable mesh items were found.")
-        render_info = _format_render_info(
+        labels = [_view_output_name(batch_index, batch_count, view) for batch_index, view in label_views]
+        return _finalize_render(
+            images=images,
+            labels=labels,
             renderer_backend=renderer_backend,
             settings=settings,
             views=views,
             auto_install_f3d=auto_install_f3d,
             blender_executable=blender_executable,
+            matrix_layout=matrix_layout,
+            label_matrix=label_matrix,
+            save_to_output=save_to_output,
+            filename_prefix=filename_prefix,
         )
-        return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels), render_info
     finally:
         if cleanup is not None:
             cleanup.cleanup()
+
+
+def _finalize_render(
+    *,
+    images: list[np.ndarray],
+    labels: list[str],
+    renderer_backend: str,
+    settings: RenderSettings,
+    views: list[str],
+    max_faces: int | None = None,
+    auto_install_f3d: bool | None = None,
+    blender_executable: str | None = None,
+    matrix_layout: str,
+    label_matrix: bool,
+    save_to_output: bool,
+    filename_prefix: str,
+) -> tuple[Any, str, str, Any, dict[str, Any]]:
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError("ComfyUI torch runtime is required to return IMAGE tensors.") from exc
+
+    contact_sheet = ContactSheetBuilder().build(
+        images,
+        labels,
+        ContactSheetSettings(layout=matrix_layout, label_views=label_matrix),
+    )
+    render_info = _format_render_info(
+        renderer_backend=renderer_backend,
+        settings=settings,
+        views=views,
+        max_faces=max_faces,
+        auto_install_f3d=auto_install_f3d,
+        blender_executable=blender_executable,
+        matrix_layout=matrix_layout,
+        save_to_output=save_to_output,
+        filename_prefix=filename_prefix,
+    )
+    saved_images = _save_render_outputs(
+        images,
+        labels,
+        contact_sheet,
+        save_to_output=save_to_output,
+        filename_prefix=filename_prefix,
+    )
+    return (
+        torch.from_numpy(np.stack(images, axis=0)).float(),
+        "\n".join(labels),
+        render_info,
+        torch.from_numpy(contact_sheet[None, ...]).float(),
+        _render_ui(render_info, saved_images),
+    )
 
 
 def _format_render_info(
@@ -242,6 +316,9 @@ def _format_render_info(
     max_faces: int | None = None,
     auto_install_f3d: bool | None = None,
     blender_executable: str | None = None,
+    matrix_layout: str | None = None,
+    save_to_output: bool | None = None,
+    filename_prefix: str | None = None,
 ) -> str:
     engine_labels = {
         "cpu_preview": "MeshRenderer CPU rasterizer",
@@ -257,6 +334,12 @@ def _format_render_info(
         f"resolution={settings.width}x{settings.height}",
         f"views={','.join(views)}",
     ]
+    if matrix_layout is not None:
+        lines.append(f"matrix_layout={matrix_layout}")
+    if save_to_output is not None:
+        lines.append(f"save_to_output={str(bool(save_to_output)).lower()}")
+    if filename_prefix and save_to_output:
+        lines.append(f"filename_prefix={filename_prefix}")
     if renderer_backend == "cpu_preview":
         lines.append(f"max_faces={max_faces if max_faces and max_faces > 0 else 'unlimited'}")
     elif renderer_backend == "nvdiffrast_optional":
@@ -270,6 +353,66 @@ def _format_render_info(
 
 def _render_info_ui(render_info: str) -> dict[str, list[str]]:
     return {"text": render_info.splitlines()}
+
+
+def _render_ui(render_info: str, saved_images: list[dict[str, str]]) -> dict[str, Any]:
+    ui: dict[str, Any] = _render_info_ui(render_info)
+    if saved_images:
+        ui["images"] = saved_images
+    return ui
+
+
+def _view_output_name(batch_index: int, batch_count: int, view: str) -> str:
+    if batch_count <= 1:
+        return view
+    return f"mesh{batch_index}_{view}"
+
+
+def _safe_filename_piece(value: str) -> str:
+    import re
+
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return safe.strip("._") or "view"
+
+
+def _save_render_outputs(
+    images: list[np.ndarray],
+    labels: list[str],
+    contact_sheet: np.ndarray,
+    *,
+    save_to_output: bool,
+    filename_prefix: str,
+) -> list[dict[str, str]]:
+    if not save_to_output:
+        return []
+    try:
+        import folder_paths
+        from PIL import Image
+        import os
+    except Exception as exc:
+        raise RuntimeError("ComfyUI folder_paths and Pillow are required to save render outputs.") from exc
+
+    output_dir = folder_paths.get_output_directory()
+    prefix = filename_prefix.strip() or "3DViewRender/render"
+    results = []
+    for image, label in zip(images, labels):
+        results.append(_save_png(Image, folder_paths, os, image, f"{prefix}_{_safe_filename_piece(label)}", output_dir))
+    results.append(_save_png(Image, folder_paths, os, contact_sheet, f"{prefix}_matrix", output_dir))
+    return results
+
+
+def _save_png(Image, folder_paths, os, image: np.ndarray, filename_prefix: str, output_dir: str) -> dict[str, str]:
+    arr = np.clip(np.asarray(image, dtype=np.float32), 0.0, 1.0)
+    height, width = arr.shape[:2]
+    full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
+        filename_prefix,
+        output_dir,
+        width,
+        height,
+    )
+    file = f"{filename}_{counter:05}_.png"
+    Image.fromarray((arr * 255.0).round().astype(np.uint8)).save(os.path.join(full_output_folder, file), compress_level=4)
+    return {"filename": file, "subfolder": subfolder, "type": "output"}
 
 
 def _external_model_paths(model: Any) -> tuple[list[str], tempfile.TemporaryDirectory[str] | None]:
@@ -539,6 +682,35 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
                     "tooltip": "Model vertical axis. z_up keeps side views upright for most GLB/OBJ assets; use y_up for Y-up models.",
                 },
             ),
+            "matrix_layout": (
+                MATRIX_LAYOUTS,
+                {
+                    "default": "3x2",
+                    "tooltip": "Layout for the single matrix/contact-sheet image. 3x2 is the six-side default.",
+                },
+            ),
+            "label_matrix": (
+                "BOOLEAN",
+                {
+                    "default": True,
+                    "tooltip": "Draw each view name in the top-left corner of the matrix image using Pillow.",
+                },
+            ),
+            "save_to_output": (
+                "BOOLEAN",
+                {
+                    "default": True,
+                    "tooltip": "Save side PNGs and the matrix PNG directly to the ComfyUI output folder.",
+                },
+            ),
+            "filename_prefix": (
+                "STRING",
+                {
+                    "default": "3DViewRender/render",
+                    "advanced": True,
+                    "tooltip": "Output filename prefix. Side names and matrix are appended automatically.",
+                },
+            ),
             "front": ("BOOLEAN", {"default": True}),
             "back": ("BOOLEAN", {"default": True}),
             "left": ("BOOLEAN", {"default": True}),
@@ -589,6 +761,7 @@ if COMFY_API_AVAILABLE:
                     "perspective mesh render",
                 ],
                 description="Render selected front/back/left/right/top/bottom views from a ComfyUI 3D model.",
+                is_output_node=True,
                 inputs=[
                     _model_input(),
                     IO.Int.Input("resolution", default=512, min=64, max=4096, step=64),
@@ -626,6 +799,28 @@ if COMFY_API_AVAILABLE:
                         default="z_up",
                         tooltip="Model vertical axis. z_up keeps side views upright for most GLB/OBJ assets; use y_up for Y-up models.",
                     ),
+                    IO.Combo.Input(
+                        "matrix_layout",
+                        options=MATRIX_LAYOUTS,
+                        default="3x2",
+                        tooltip="Layout for the single matrix/contact-sheet image. 3x2 is the six-side default.",
+                    ),
+                    IO.Boolean.Input(
+                        "label_matrix",
+                        default=True,
+                        tooltip="Draw each view name in the top-left corner of the matrix image using Pillow.",
+                    ),
+                    IO.Boolean.Input(
+                        "save_to_output",
+                        default=True,
+                        tooltip="Save side PNGs and the matrix PNG directly to the ComfyUI output folder.",
+                    ),
+                    IO.String.Input(
+                        "filename_prefix",
+                        default="3DViewRender/render",
+                        advanced=True,
+                        tooltip="Output filename prefix. Side names and matrix are appended automatically.",
+                    ),
                     IO.Boolean.Input("front", default=True, label_on="render", label_off="skip"),
                     IO.Boolean.Input("back", default=True, label_on="render", label_off="skip"),
                     IO.Boolean.Input("left", default=True, label_on="render", label_off="skip"),
@@ -643,6 +838,7 @@ if COMFY_API_AVAILABLE:
                     IO.Image.Output(display_name="images"),
                     IO.String.Output(display_name="view_names"),
                     IO.String.Output(display_name="render_info"),
+                    IO.Image.Output(display_name="contact_sheet"),
                 ],
             )
 
@@ -657,6 +853,10 @@ if COMFY_API_AVAILABLE:
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             up_axis: str = "z_up",
+            matrix_layout: str = "3x2",
+            label_matrix: bool = True,
+            save_to_output: bool = True,
+            filename_prefix: str = "3DViewRender/render",
             front: bool = True,
             back: bool = True,
             left: bool = True,
@@ -670,7 +870,7 @@ if COMFY_API_AVAILABLE:
             camera_distance: float = 2.4,
             shading: bool = True,
         ):
-            images, names, render_info = _render(
+            images, names, render_info, contact_sheet, ui = _render(
                 model=model,
                 resolution=resolution,
                 renderer_backend=renderer_backend,
@@ -679,6 +879,10 @@ if COMFY_API_AVAILABLE:
                 max_faces=max_faces,
                 camera_mode=camera_mode,
                 up_axis=up_axis,
+                matrix_layout=matrix_layout,
+                label_matrix=label_matrix,
+                save_to_output=save_to_output,
+                filename_prefix=filename_prefix,
                 front=front,
                 back=back,
                 left=left,
@@ -692,7 +896,7 @@ if COMFY_API_AVAILABLE:
                 camera_distance=camera_distance,
                 shading=shading,
             )
-            return IO.NodeOutput(images, names, render_info, ui=_render_info_ui(render_info))
+            return IO.NodeOutput(images, names, render_info, contact_sheet, ui=ui)
 
         render = execute
 
@@ -709,10 +913,11 @@ if COMFY_API_AVAILABLE:
 else:
 
     class SixSideRender:
-        RETURN_TYPES = ("IMAGE", "STRING", "STRING")
-        RETURN_NAMES = ("images", "view_names", "render_info")
+        RETURN_TYPES = ("IMAGE", "STRING", "STRING", "IMAGE")
+        RETURN_NAMES = ("images", "view_names", "render_info", "contact_sheet")
         FUNCTION = "render"
         CATEGORY = CATEGORY
+        OUTPUT_NODE = True
 
         @classmethod
         def INPUT_TYPES(cls):
@@ -728,6 +933,10 @@ else:
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             up_axis: str = "z_up",
+            matrix_layout: str = "3x2",
+            label_matrix: bool = True,
+            save_to_output: bool = True,
+            filename_prefix: str = "3DViewRender/render",
             front: bool = True,
             back: bool = True,
             left: bool = True,
@@ -741,7 +950,7 @@ else:
             camera_distance: float = 2.4,
             shading: bool = True,
         ):
-            images, names, render_info = _render(
+            images, names, render_info, contact_sheet, ui = _render(
                 model=model,
                 resolution=resolution,
                 renderer_backend=renderer_backend,
@@ -750,6 +959,10 @@ else:
                 max_faces=max_faces,
                 camera_mode=camera_mode,
                 up_axis=up_axis,
+                matrix_layout=matrix_layout,
+                label_matrix=label_matrix,
+                save_to_output=save_to_output,
+                filename_prefix=filename_prefix,
                 front=front,
                 back=back,
                 left=left,
@@ -764,6 +977,6 @@ else:
                 shading=shading,
             )
             return {
-                "ui": _render_info_ui(render_info),
-                "result": (images, names, render_info),
+                "ui": ui,
+                "result": (images, names, render_info, contact_sheet),
             }

@@ -103,14 +103,19 @@ class V3EntrypointContractTests(unittest.TestCase):
             assert "max_faces" in input_ids
             assert "camera_mode" in input_ids
             assert "up_axis" in input_ids
-            assert output_names == ["images", "view_names", "render_info"]
+            assert "matrix_layout" in input_ids
+            assert "label_matrix" in input_ids
+            assert "save_to_output" in input_ids
+            assert "filename_prefix" in input_ids
+            assert schema.is_output_node is True
+            assert output_names == ["images", "view_names", "render_info", "contact_sheet"]
 
             def fake_render(**kwargs):
-                return "images", "0:right", "renderer_backend=cpu_preview"
+                return "images", "right", "renderer_backend=cpu_preview", "contact_sheet", {"text": ["renderer_backend=cpu_preview"]}
 
             nodes._render = fake_render
             output = nodes.SixSideRender.execute(model="mesh")
-            assert output.args == ("images", "0:right", "renderer_backend=cpu_preview")
+            assert output.args == ("images", "right", "renderer_backend=cpu_preview", "contact_sheet")
             assert output.ui == {"text": ["renderer_backend=cpu_preview"]}
             """
         )

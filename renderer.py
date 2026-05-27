@@ -50,6 +50,14 @@ class RenderedView:
     image: np.ndarray
 
 
+@dataclass(frozen=True)
+class ContactSheetSettings:
+    layout: str = "3x2"
+    label_views: bool = True
+    label_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    label_background: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+
 Y_UP_VIEW_POSES = {
     "front": CameraPose("front", np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])),
     "back": CameraPose("back", np.array([0.0, 0.0, -1.0]), np.array([0.0, 1.0, 0.0])),
@@ -322,6 +330,83 @@ class MeshRenderer:
             - (tri_2d[2, 0] - tri_2d[0, 0]) * (tri_2d[1, 1] - tri_2d[0, 1])
         )
         return abs(float(area)) <= 1e-5
+
+
+class ContactSheetBuilder:
+    def build(
+        self,
+        images: Sequence[np.ndarray],
+        labels: Sequence[str],
+        settings: ContactSheetSettings | None = None,
+    ) -> np.ndarray:
+        if not images:
+            raise ValueError("No images were provided for the contact sheet.")
+        settings = settings or ContactSheetSettings()
+        prepared = [self._prepare_image(image) for image in images]
+        tile_height, tile_width = prepared[0].shape[:2]
+        if any(image.shape[:2] != (tile_height, tile_width) for image in prepared):
+            raise ValueError("All contact sheet images must have the same size.")
+
+        rows, cols = self._grid(len(prepared), settings.layout)
+        sheet = np.zeros((rows * tile_height, cols * tile_width, 3), dtype=np.float32)
+        for index, image in enumerate(prepared):
+            row = index // cols
+            col = index % cols
+            y0 = row * tile_height
+            x0 = col * tile_width
+            sheet[y0 : y0 + tile_height, x0 : x0 + tile_width, :] = image
+
+        if settings.label_views:
+            sheet = self._draw_labels(sheet, labels, cols, tile_width, tile_height, settings)
+        return np.clip(sheet, 0.0, 1.0)
+
+    def _grid(self, count: int, layout: str) -> tuple[int, int]:
+        if layout == "auto":
+            cols = int(np.ceil(np.sqrt(count)))
+        else:
+            try:
+                cols_text, _rows_text = layout.lower().split("x", 1)
+                cols = int(cols_text)
+            except Exception as exc:
+                raise ValueError(f"Unknown matrix layout: {layout}") from exc
+        cols = max(cols, 1)
+        return int(np.ceil(count / cols)), cols
+
+    def _prepare_image(self, image: np.ndarray) -> np.ndarray:
+        arr = np.asarray(image, dtype=np.float32)
+        if arr.ndim != 3 or arr.shape[2] < 3:
+            raise ValueError(f"Contact sheet image must be HxWx3, got {arr.shape}")
+        return np.clip(arr[:, :, :3], 0.0, 1.0)
+
+    def _draw_labels(
+        self,
+        sheet: np.ndarray,
+        labels: Sequence[str],
+        cols: int,
+        tile_width: int,
+        tile_height: int,
+        settings: ContactSheetSettings,
+    ) -> np.ndarray:
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except Exception as exc:
+            raise RuntimeError("Pillow is required to draw contact sheet labels.") from exc
+
+        pil = Image.fromarray((sheet * 255.0).round().astype(np.uint8))
+        draw = ImageDraw.Draw(pil)
+        font = ImageFont.load_default()
+        text_color = tuple(int(_clamp(channel) * 255) for channel in settings.label_color)
+        bg_color = tuple(int(_clamp(channel) * 255) for channel in settings.label_background)
+        for index, label in enumerate(labels):
+            row = index // cols
+            col = index % cols
+            x = col * tile_width + 6
+            y = row * tile_height + 6
+            text = str(label)
+            bbox = draw.textbbox((x, y), text, font=font)
+            draw.rectangle((bbox[0] - 3, bbox[1] - 2, bbox[2] + 3, bbox[3] + 2), fill=bg_color)
+            draw.text((x, y), text, fill=text_color, font=font)
+        return np.asarray(pil, dtype=np.float32) / 255.0
 
 
 class NvdiffrastRenderer:

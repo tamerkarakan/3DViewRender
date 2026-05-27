@@ -8,7 +8,17 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from renderer import CameraMode, MeshBatchItem, MeshRenderer, RenderSettings, parse_color, selected_view_names, view_pose
+from renderer import (
+    CameraMode,
+    ContactSheetBuilder,
+    ContactSheetSettings,
+    MeshBatchItem,
+    MeshRenderer,
+    RenderSettings,
+    parse_color,
+    selected_view_names,
+    view_pose,
+)
 from nodes import _file_type_from_model, _limit_faces, _mesh_batch_items
 
 
@@ -108,6 +118,21 @@ class MeshRendererTests(unittest.TestCase):
         renderer = MeshRenderer()
         with self.assertRaisesRegex(ValueError, "Select at least one"):
             renderer.render_views(make_box(), [], RenderSettings(width=32, height=32))
+
+    def test_contact_sheet_builds_labeled_three_by_two_matrix(self):
+        images = []
+        labels = []
+        for index, side in enumerate(["front", "back", "left", "right", "top", "bottom"]):
+            image = np.zeros((8, 8, 3), dtype=np.float32)
+            image[:, :, index % 3] = 0.25 + index * 0.1
+            images.append(image)
+            labels.append(side)
+
+        sheet = ContactSheetBuilder().build(images, labels, ContactSheetSettings(layout="3x2", label_views=True))
+
+        self.assertEqual(sheet.shape, (16, 24, 3))
+        self.assertGreater(float(sheet[:8, :8].sum()), 0.0)
+        self.assertGreater(float(sheet[8:16, 16:24].sum()), 0.0)
 
     def test_z_up_side_view_keeps_z_axis_upright(self):
         renderer = MeshRenderer()

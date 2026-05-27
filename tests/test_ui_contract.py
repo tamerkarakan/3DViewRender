@@ -10,8 +10,8 @@ from renderer import VIEW_ORDER
 
 class UiContractTests(unittest.TestCase):
     def test_node_outputs_image_batch_and_view_names(self):
-        self.assertEqual(tuple(nodes.SixSideRender.RETURN_TYPES), ("IMAGE", "STRING", "STRING"))
-        self.assertEqual(tuple(nodes.SixSideRender.RETURN_NAMES), ("images", "view_names", "render_info"))
+        self.assertEqual(tuple(nodes.SixSideRender.RETURN_TYPES), ("IMAGE", "STRING", "STRING", "IMAGE"))
+        self.assertEqual(tuple(nodes.SixSideRender.RETURN_NAMES), ("images", "view_names", "render_info", "contact_sheet"))
 
     def test_legacy_ui_schema_exposes_six_side_toggles(self):
         schema = nodes._legacy_inputs()
@@ -43,6 +43,11 @@ class UiContractTests(unittest.TestCase):
         self.assertEqual(required["camera_mode"][1]["default"], "orthographic")
         self.assertEqual(required["up_axis"][0], ["z_up", "y_up"])
         self.assertEqual(required["up_axis"][1]["default"], "z_up")
+        self.assertEqual(required["matrix_layout"][0], ["3x2", "2x3", "6x1", "1x6", "auto"])
+        self.assertEqual(required["matrix_layout"][1]["default"], "3x2")
+        self.assertEqual(required["label_matrix"][1]["default"], True)
+        self.assertEqual(required["save_to_output"][1]["default"], True)
+        self.assertEqual(required["filename_prefix"][1]["default"], "3DViewRender/render")
         self.assertEqual(required["resolution"][1]["default"], 512)
         self.assertEqual(required["max_faces"][1]["default"], 10000)
         self.assertTrue(required["max_faces"][1]["advanced"])
@@ -56,12 +61,21 @@ class UiContractTests(unittest.TestCase):
             settings=nodes.RenderSettings(width=128, height=128, up_axis="z_up"),
             views=["right"],
             max_faces=10000,
+            matrix_layout="3x2",
+            save_to_output=True,
+            filename_prefix="3DViewRender/render",
         )
 
         self.assertIn("renderer_backend=cpu_preview", info)
         self.assertIn("renderer_engine=MeshRenderer CPU rasterizer", info)
         self.assertIn("up_axis=z_up", info)
         self.assertIn("views=right", info)
+        self.assertIn("matrix_layout=3x2", info)
+        self.assertIn("save_to_output=true", info)
+
+    def test_single_batch_view_names_are_plain_side_names(self):
+        self.assertEqual(nodes._view_output_name(0, 1, "front"), "front")
+        self.assertEqual(nodes._view_output_name(2, 3, "front"), "mesh2_front")
 
     def test_render_info_ui_is_frontend_text_payload(self):
         self.assertEqual(
