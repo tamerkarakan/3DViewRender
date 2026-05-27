@@ -2,6 +2,9 @@ import subprocess
 import sys
 import textwrap
 import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 class V3EntrypointContractTests(unittest.TestCase):
@@ -10,6 +13,9 @@ class V3EntrypointContractTests(unittest.TestCase):
             """
             import sys
             import types
+            from pathlib import Path
+
+            sys.path.insert(0, str(Path.cwd()))
 
             class Field:
                 def __init__(self, id=None, display_name=None, **kwargs):
@@ -96,7 +102,16 @@ class V3EntrypointContractTests(unittest.TestCase):
             assert "blender_path" in input_ids
             assert "max_faces" in input_ids
             assert "camera_mode" in input_ids
-            assert output_names == ["images", "view_names"]
+            assert "up_axis" in input_ids
+            assert output_names == ["images", "view_names", "render_info"]
+
+            def fake_render(**kwargs):
+                return "images", "0:right", "renderer_backend=cpu_preview"
+
+            nodes._render = fake_render
+            output = nodes.SixSideRender.execute(model="mesh")
+            assert output.args == ("images", "0:right", "renderer_backend=cpu_preview")
+            assert output.ui == {"text": ["renderer_backend=cpu_preview"]}
             """
         )
 

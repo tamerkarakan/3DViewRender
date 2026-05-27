@@ -14,6 +14,7 @@ Inputs:
 - `resolution`: square output image size
 - `renderer_backend`: `cpu_preview`, `f3d_optional`, `blender_optional`, or `nvdiffrast_optional`
 - `camera_mode`: `orthographic` or `perspective`
+- `up_axis`: model vertical axis, `z_up` by default; switch to `y_up` for Y-up assets
 - `front`, `back`, `left`, `right`, `top`, `bottom`: side selection toggles
 - advanced controls: `auto_install_f3d`, `blender_path`, `max_faces`, `background_color`, `mesh_color`, `fov_degrees`, `orthographic_scale`, `camera_distance`, `shading`
 
@@ -29,6 +30,9 @@ Outputs:
 
 - `images`: ComfyUI `IMAGE` batch in selected side order for each mesh batch item
 - `view_names`: newline-separated labels such as `0:front`
+- `render_info`: renderer/backend details, camera mode, model up axis, resolution, and selected views
+
+The same `render_info` text is also returned as a ComfyUI frontend `ui.text` payload so it can be seen in the node result panel after execution without wiring an extra text preview node.
 
 ## Tests
 

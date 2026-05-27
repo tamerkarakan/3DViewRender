@@ -62,6 +62,7 @@ DISPLAY_NAME = "3D View Render: Six Sides"
 CATEGORY = "3d/render"
 CAMERA_MODES = [CameraMode.ORTHOGRAPHIC.value, CameraMode.PERSPECTIVE.value]
 RENDERER_BACKENDS = ["cpu_preview", "f3d_optional", "blender_optional", "nvdiffrast_optional"]
+UP_AXES = ["z_up", "y_up"]
 MODEL_INPUT_TYPES = (
     "MESH",
     "TRIMESH",
@@ -83,16 +84,20 @@ def _build_settings(
     camera_mode: str,
     background_color: str,
     mesh_color: str,
+    up_axis: str,
     fov_degrees: float,
     orthographic_scale: float,
     camera_distance: float,
     shading: bool,
 ) -> RenderSettings:
     mode = CameraMode(camera_mode)
+    if up_axis not in UP_AXES:
+        raise ValueError(f"Unknown up axis: {up_axis}")
     base = RenderSettings(
         width=int(resolution),
         height=int(resolution),
         camera_mode=mode,
+        up_axis=up_axis,
         fov_degrees=float(fov_degrees),
         orthographic_scale=float(orthographic_scale),
         camera_distance=float(camera_distance),
@@ -122,16 +127,18 @@ def _render(
     bottom: bool,
     background_color: str,
     mesh_color: str,
+    up_axis: str,
     fov_degrees: float,
     orthographic_scale: float,
     camera_distance: float,
     shading: bool,
-) -> tuple[Any, str]:
+) -> tuple[Any, str, str]:
     settings = _build_settings(
         resolution=resolution,
         camera_mode=camera_mode,
         background_color=background_color,
         mesh_color=mesh_color,
+        up_axis=up_axis,
         fov_degrees=fov_degrees,
         orthographic_scale=orthographic_scale,
         camera_distance=camera_distance,
@@ -172,7 +179,13 @@ def _render(
     except Exception as exc:
         raise RuntimeError("ComfyUI torch runtime is required to return IMAGE tensors.") from exc
 
-    return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels)
+    render_info = _format_render_info(
+        renderer_backend=renderer_backend,
+        settings=settings,
+        views=views,
+        max_faces=max_faces if renderer_backend == "cpu_preview" else 0,
+    )
+    return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels), render_info
 
 
 def _render_external(
@@ -183,7 +196,7 @@ def _render_external(
     renderer_backend: str,
     auto_install_f3d: bool,
     blender_path: str,
-) -> tuple[Any, str]:
+) -> tuple[Any, str, str]:
     try:
         import torch
     except Exception as exc:
@@ -193,8 +206,10 @@ def _render_external(
     try:
         if renderer_backend == "f3d_optional":
             renderer = F3DRenderer(auto_install=auto_install_f3d)
+            blender_executable = None
         elif renderer_backend == "blender_optional":
             renderer = BlenderRenderer(blender_path=blender_path)
+            blender_executable = renderer.blender_executable
         else:
             raise ValueError(f"Unknown external renderer backend: {renderer_backend}")
 
@@ -206,10 +221,55 @@ def _render_external(
                 labels.append(f"{batch_index}:{rendered.name}")
         if not images:
             raise ValueError("No renderable mesh items were found.")
-        return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels)
+        render_info = _format_render_info(
+            renderer_backend=renderer_backend,
+            settings=settings,
+            views=views,
+            auto_install_f3d=auto_install_f3d,
+            blender_executable=blender_executable,
+        )
+        return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels), render_info
     finally:
         if cleanup is not None:
             cleanup.cleanup()
+
+
+def _format_render_info(
+    *,
+    renderer_backend: str,
+    settings: RenderSettings,
+    views: list[str],
+    max_faces: int | None = None,
+    auto_install_f3d: bool | None = None,
+    blender_executable: str | None = None,
+) -> str:
+    engine_labels = {
+        "cpu_preview": "MeshRenderer CPU rasterizer",
+        "f3d_optional": "F3D offscreen renderer",
+        "blender_optional": "Blender background renderer",
+        "nvdiffrast_optional": "nvdiffrast CUDA renderer",
+    }
+    lines = [
+        f"renderer_backend={renderer_backend}",
+        f"renderer_engine={engine_labels.get(renderer_backend, renderer_backend)}",
+        f"camera_mode={settings.camera_mode.value}",
+        f"up_axis={settings.up_axis}",
+        f"resolution={settings.width}x{settings.height}",
+        f"views={','.join(views)}",
+    ]
+    if renderer_backend == "cpu_preview":
+        lines.append(f"max_faces={max_faces if max_faces and max_faces > 0 else 'unlimited'}")
+    elif renderer_backend == "nvdiffrast_optional":
+        lines.append("max_faces=unlimited")
+    elif renderer_backend == "f3d_optional":
+        lines.append(f"auto_install_f3d={str(bool(auto_install_f3d)).lower()}")
+    elif renderer_backend == "blender_optional" and blender_executable:
+        lines.append(f"blender_executable={blender_executable}")
+    return "\n".join(lines)
+
+
+def _render_info_ui(render_info: str) -> dict[str, list[str]]:
+    return {"text": render_info.splitlines()}
 
 
 def _external_model_paths(model: Any) -> tuple[list[str], tempfile.TemporaryDirectory[str] | None]:
@@ -472,6 +532,13 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
                 },
             ),
             "camera_mode": (CAMERA_MODES, {"default": CameraMode.ORTHOGRAPHIC.value}),
+            "up_axis": (
+                UP_AXES,
+                {
+                    "default": "z_up",
+                    "tooltip": "Model vertical axis. z_up keeps side views upright for most GLB/OBJ assets; use y_up for Y-up models.",
+                },
+            ),
             "front": ("BOOLEAN", {"default": True}),
             "back": ("BOOLEAN", {"default": True}),
             "left": ("BOOLEAN", {"default": True}),
@@ -553,6 +620,12 @@ if COMFY_API_AVAILABLE:
                         tooltip="Caps faces before CPU rasterization. Set 0 to disable for small meshes only.",
                     ),
                     IO.Combo.Input("camera_mode", options=CAMERA_MODES, default=CameraMode.ORTHOGRAPHIC.value),
+                    IO.Combo.Input(
+                        "up_axis",
+                        options=UP_AXES,
+                        default="z_up",
+                        tooltip="Model vertical axis. z_up keeps side views upright for most GLB/OBJ assets; use y_up for Y-up models.",
+                    ),
                     IO.Boolean.Input("front", default=True, label_on="render", label_off="skip"),
                     IO.Boolean.Input("back", default=True, label_on="render", label_off="skip"),
                     IO.Boolean.Input("left", default=True, label_on="render", label_off="skip"),
@@ -569,6 +642,7 @@ if COMFY_API_AVAILABLE:
                 outputs=[
                     IO.Image.Output(display_name="images"),
                     IO.String.Output(display_name="view_names"),
+                    IO.String.Output(display_name="render_info"),
                 ],
             )
 
@@ -582,6 +656,7 @@ if COMFY_API_AVAILABLE:
             blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
+            up_axis: str = "z_up",
             front: bool = True,
             back: bool = True,
             left: bool = True,
@@ -595,7 +670,7 @@ if COMFY_API_AVAILABLE:
             camera_distance: float = 2.4,
             shading: bool = True,
         ):
-            images, names = _render(
+            images, names, render_info = _render(
                 model=model,
                 resolution=resolution,
                 renderer_backend=renderer_backend,
@@ -603,6 +678,7 @@ if COMFY_API_AVAILABLE:
                 blender_path=blender_path,
                 max_faces=max_faces,
                 camera_mode=camera_mode,
+                up_axis=up_axis,
                 front=front,
                 back=back,
                 left=left,
@@ -616,7 +692,7 @@ if COMFY_API_AVAILABLE:
                 camera_distance=camera_distance,
                 shading=shading,
             )
-            return IO.NodeOutput(images, names)
+            return IO.NodeOutput(images, names, render_info, ui=_render_info_ui(render_info))
 
         render = execute
 
@@ -633,8 +709,8 @@ if COMFY_API_AVAILABLE:
 else:
 
     class SixSideRender:
-        RETURN_TYPES = ("IMAGE", "STRING")
-        RETURN_NAMES = ("images", "view_names")
+        RETURN_TYPES = ("IMAGE", "STRING", "STRING")
+        RETURN_NAMES = ("images", "view_names", "render_info")
         FUNCTION = "render"
         CATEGORY = CATEGORY
 
@@ -651,6 +727,7 @@ else:
             blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
+            up_axis: str = "z_up",
             front: bool = True,
             back: bool = True,
             left: bool = True,
@@ -664,7 +741,7 @@ else:
             camera_distance: float = 2.4,
             shading: bool = True,
         ):
-            return _render(
+            images, names, render_info = _render(
                 model=model,
                 resolution=resolution,
                 renderer_backend=renderer_backend,
@@ -672,6 +749,7 @@ else:
                 blender_path=blender_path,
                 max_faces=max_faces,
                 camera_mode=camera_mode,
+                up_axis=up_axis,
                 front=front,
                 back=back,
                 left=left,
@@ -685,3 +763,7 @@ else:
                 camera_distance=camera_distance,
                 shading=shading,
             )
+            return {
+                "ui": _render_info_ui(render_info),
+                "result": (images, names, render_info),
+            }

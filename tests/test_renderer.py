@@ -2,10 +2,13 @@ import importlib.util
 import unittest
 import tempfile
 from pathlib import Path
+import sys
 
 import numpy as np
 
-from renderer import CameraMode, MeshBatchItem, MeshRenderer, RenderSettings, parse_color, selected_view_names
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from renderer import CameraMode, MeshBatchItem, MeshRenderer, RenderSettings, parse_color, selected_view_names, view_pose
 from nodes import _file_type_from_model, _limit_faces, _mesh_batch_items
 
 
@@ -105,6 +108,28 @@ class MeshRendererTests(unittest.TestCase):
         renderer = MeshRenderer()
         with self.assertRaisesRegex(ValueError, "Select at least one"):
             renderer.render_views(make_box(), [], RenderSettings(width=32, height=32))
+
+    def test_z_up_side_view_keeps_z_axis_upright(self):
+        renderer = MeshRenderer()
+        mesh = MeshBatchItem(
+            vertices=np.array(
+                [
+                    [0.0, 0.0, -1.0],
+                    [0.0, 0.0, 1.0],
+                    [0.2, 0.0, 0.0],
+                ],
+                dtype=np.float32,
+            ),
+            faces=np.array([[0, 1, 2]], dtype=np.int64),
+        )
+        vertices, _, _ = renderer._prepare_mesh(mesh)
+        projected, *_ = renderer._project(
+            vertices,
+            view_pose("right", "z_up"),
+            RenderSettings(width=64, height=64, up_axis="z_up", orthographic_scale=2.0),
+        )
+
+        self.assertLess(projected[1, 1], projected[0, 1])
 
     def test_accepts_trimesh_like_objects(self):
         FakeTrimesh = type("Trimesh", (), {"__module__": "trimesh.base"})

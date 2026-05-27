@@ -14,9 +14,9 @@ from typing import Iterable
 import numpy as np
 
 try:
-    from .renderer import CameraMode, RenderSettings, RenderedView, VIEW_POSES
+    from .renderer import CameraMode, RenderSettings, RenderedView, view_pose
 except ImportError:
-    from renderer import CameraMode, RenderSettings, RenderedView, VIEW_POSES  # type: ignore
+    from renderer import CameraMode, RenderSettings, RenderedView, view_pose  # type: ignore
 
 
 @dataclass(frozen=True)
@@ -48,8 +48,6 @@ class F3DRenderer:
         settings: RenderSettings,
         bounds: ModelBounds,
     ) -> np.ndarray:
-        if view not in VIEW_POSES:
-            raise ValueError(f"Unknown view: {view}")
         f3d = self._f3d
         f3d.Engine.autoload_plugins()
         engine = f3d.Engine.create(True)
@@ -64,7 +62,7 @@ class F3DRenderer:
         engine.options["render.effect.antialiasing.enable"] = True
         engine.scene.add(str(model_path))
 
-        pose = VIEW_POSES[view]
+        pose = view_pose(view, settings.up_axis)
         direction = _normalize(pose.direction)
         up = _normalize(pose.up)
         distance = max(bounds.extent * float(settings.camera_distance), bounds.extent * 1.5, 0.25)
@@ -263,6 +261,7 @@ def _write_blender_config(
         "output_dir": str(output_dir),
         "resolution": int(settings.width),
         "camera_mode": settings.camera_mode.value,
+        "up_axis": settings.up_axis,
         "background_color": list(settings.background_color),
         "mesh_color": list(settings.mesh_color),
         "fov_degrees": float(settings.fov_degrees),
@@ -290,13 +289,23 @@ import bpy
 from mathutils import Matrix, Vector
 
 
-VIEW_POSES = {
-    "front": ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
-    "back": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
-    "left": ((-1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
-    "right": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
-    "top": ((0.0, 1.0, 0.0), (0.0, 0.0, -1.0)),
-    "bottom": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
+VIEW_POSES_BY_UP_AXIS = {
+    "y_up": {
+        "front": ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
+        "back": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
+        "left": ((-1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        "right": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        "top": ((0.0, 1.0, 0.0), (0.0, 0.0, -1.0)),
+        "bottom": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
+    },
+    "z_up": {
+        "front": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
+        "back": ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+        "left": ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+        "right": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+        "top": ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
+        "bottom": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
+    },
 }
 
 
@@ -413,7 +422,7 @@ def render_views(cfg):
     output_dir = cfg["output_dir"]
     os.makedirs(output_dir, exist_ok=True)
     for name in cfg["views"]:
-        direction, up = VIEW_POSES[name]
+        direction, up = VIEW_POSES_BY_UP_AXIS[cfg["up_axis"]][name]
         distance = max(float(cfg["camera_distance"]), 0.25)
         position = tuple(float(v) * distance for v in direction)
         look_at(camera, position, (0.0, 0.0, 0.0), up)

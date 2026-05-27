@@ -27,6 +27,7 @@ class RenderSettings:
     width: int = 512
     height: int = 512
     camera_mode: CameraMode = CameraMode.ORTHOGRAPHIC
+    up_axis: str = "z_up"
     background_color: tuple[float, float, float] = (0.0, 0.0, 0.0)
     mesh_color: tuple[float, float, float] = (0.82, 0.84, 0.88)
     fov_degrees: float = 45.0
@@ -49,7 +50,7 @@ class RenderedView:
     image: np.ndarray
 
 
-VIEW_POSES = {
+Y_UP_VIEW_POSES = {
     "front": CameraPose("front", np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])),
     "back": CameraPose("back", np.array([0.0, 0.0, -1.0]), np.array([0.0, 1.0, 0.0])),
     "left": CameraPose("left", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])),
@@ -57,6 +58,27 @@ VIEW_POSES = {
     "top": CameraPose("top", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
     "bottom": CameraPose("bottom", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
 }
+Z_UP_VIEW_POSES = {
+    "front": CameraPose("front", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+    "back": CameraPose("back", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+    "left": CameraPose("left", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+    "right": CameraPose("right", np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+    "top": CameraPose("top", np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])),
+    "bottom": CameraPose("bottom", np.array([0.0, 0.0, -1.0]), np.array([0.0, 1.0, 0.0])),
+}
+VIEW_POSES = Y_UP_VIEW_POSES
+
+
+def view_pose(view: str, up_axis: str = "z_up") -> CameraPose:
+    if up_axis == "z_up":
+        poses = Z_UP_VIEW_POSES
+    elif up_axis == "y_up":
+        poses = Y_UP_VIEW_POSES
+    else:
+        raise ValueError(f"Unknown up axis: {up_axis}")
+    if view not in poses:
+        raise ValueError(f"Unknown view: {view}")
+    return poses[view]
 
 
 def parse_color(value: str | Sequence[float], fallback: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -120,10 +142,8 @@ class MeshRenderer:
         return [RenderedView(name, self.render(mesh, name, settings)) for name in view_names]
 
     def render(self, mesh: MeshBatchItem, view: str, settings: RenderSettings) -> np.ndarray:
-        if view not in VIEW_POSES:
-            raise ValueError(f"Unknown view: {view}")
         vertices, faces, vertex_colors = self._prepare_mesh(mesh)
-        pose = VIEW_POSES[view]
+        pose = view_pose(view, settings.up_axis)
         projected, depths, camera_vertices, world_vertices, light_direction = self._project(vertices, pose, settings)
 
         image = np.zeros((settings.height, settings.width, 3), dtype=np.float32)
@@ -333,11 +353,8 @@ class NvdiffrastRenderer:
         return [RenderedView(name, self.render(mesh, name, settings)) for name in view_names]
 
     def render(self, mesh: MeshBatchItem, view: str, settings: RenderSettings) -> np.ndarray:
-        if view not in VIEW_POSES:
-            raise ValueError(f"Unknown view: {view}")
-
         vertices, faces, vertex_colors = self._cpu_renderer._prepare_mesh(mesh)
-        pose = VIEW_POSES[view]
+        pose = view_pose(view, settings.up_axis)
         projected, depths, _camera_vertices, world_vertices, light_direction = self._cpu_renderer._project(
             vertices, pose, settings
         )
