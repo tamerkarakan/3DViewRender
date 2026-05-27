@@ -12,9 +12,10 @@ Inputs:
 
 - `model`: ComfyUI `MESH`, `TRIMESH`, `MESHWITHVOXEL`, `FILE_3D*`, or a 3D file path string
 - `resolution`: square output image size
-- `renderer_backend`: `cpu_preview`, `f3d_optional`, `blender_optional`, or `nvdiffrast_optional`
+- `renderer_backend`: `f3d_optional` by default, or `cpu_preview`, `blender_optional`, `nvdiffrast_optional`
 - `camera_mode`: `orthographic` or `perspective`
 - `up_axis`: model vertical axis, `+Z` by default; choose `+Z`, `-Z`, `+Y`, `-Y`, `+X`, or `-X`
+- `front_axis`: model front direction, `-Y` by default; the frontend removes choices parallel to `up_axis`, and the backend rejects invalid workflow/API pairs
 - `matrix_layout`: single-image matrix layout, `3x2` by default for six sides
 - `label_matrix`: draw each side name in the top-left corner of side images and matrix tiles using Pillow
 - `save_to_output`: save side PNGs plus the matrix PNG directly into ComfyUI's output folder
@@ -23,7 +24,7 @@ Inputs:
 
 `max_faces` defaults to `10000` because the fallback renderer is a CPU rasterizer. Large generated meshes can contain millions of triangles; this cap keeps ComfyUI responsive. Set it to `0` only for small meshes when full triangle coverage is required.
 
-`f3d_optional` renders full file inputs through the BSD-licensed `f3d` Python package. It is not installed as a hard dependency; either install it manually with `python -m pip install -r requirements-f3d.txt` or enable `auto_install_f3d` for a one-time install from inside the node.
+`f3d_optional` renders full file inputs through the BSD-licensed `f3d` Python package and is the default backend. It is listed in `requirements.txt`; if a manual install skipped requirements, enable `auto_install_f3d` for a one-time install from inside the node.
 
 `blender_optional` renders through a local Blender executable. `blender_path` accepts either a Blender folder or the full `blender.exe` path; leave it blank to auto-detect `PATH`, `BLENDER_PATH`, `BLENDER_EXE`, and common install folders.
 
@@ -33,7 +34,7 @@ Outputs:
 
 - `images`: ComfyUI `IMAGE` batch in selected side order for each mesh batch item
 - `view_names`: newline-separated labels such as `front`, `back`, `left`
-- `render_info`: renderer/backend details, camera mode, model up axis, resolution, and selected views
+- `render_info`: renderer/backend details, camera mode, model up/front axes, resolution, and selected views
 - `contact_sheet`: one labeled matrix image containing the selected views
 
 The same `render_info` text is also returned as a ComfyUI frontend `ui.text` payload so it can be seen in the node result panel after execution without wiring an extra text preview node. With `save_to_output` enabled, the frontend result also contains side-named output images and the matrix image.

@@ -28,6 +28,7 @@ class RenderSettings:
     height: int = 512
     camera_mode: CameraMode = CameraMode.ORTHOGRAPHIC
     up_axis: str = "+Z"
+    front_axis: str | None = None
     background_color: tuple[float, float, float] = (0.0, 0.0, 0.0)
     mesh_color: tuple[float, float, float] = (0.82, 0.84, 0.88)
     fov_degrees: float = 45.0
@@ -58,66 +59,34 @@ class ContactSheetSettings:
     label_background: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
-Y_UP_VIEW_POSES = {
-    "front": CameraPose("front", np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])),
-    "back": CameraPose("back", np.array([0.0, 0.0, -1.0]), np.array([0.0, 1.0, 0.0])),
-    "left": CameraPose("left", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])),
-    "right": CameraPose("right", np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])),
-    "top": CameraPose("top", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
-    "bottom": CameraPose("bottom", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+AXES = ("+Z", "-Z", "+Y", "-Y", "+X", "-X")
+AXIS_VECTORS = {
+    "+Z": np.array([0.0, 0.0, 1.0], dtype=np.float32),
+    "-Z": np.array([0.0, 0.0, -1.0], dtype=np.float32),
+    "+Y": np.array([0.0, 1.0, 0.0], dtype=np.float32),
+    "-Y": np.array([0.0, -1.0, 0.0], dtype=np.float32),
+    "+X": np.array([1.0, 0.0, 0.0], dtype=np.float32),
+    "-X": np.array([-1.0, 0.0, 0.0], dtype=np.float32),
 }
-NEGATIVE_Y_UP_VIEW_POSES = {
-    "front": CameraPose("front", np.array([0.0, 0.0, -1.0]), np.array([0.0, -1.0, 0.0])),
-    "back": CameraPose("back", np.array([0.0, 0.0, 1.0]), np.array([0.0, -1.0, 0.0])),
-    "left": CameraPose("left", np.array([-1.0, 0.0, 0.0]), np.array([0.0, -1.0, 0.0])),
-    "right": CameraPose("right", np.array([1.0, 0.0, 0.0]), np.array([0.0, -1.0, 0.0])),
-    "top": CameraPose("top", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
-    "bottom": CameraPose("bottom", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
+OPPOSITE_AXES = {
+    "+Z": "-Z",
+    "-Z": "+Z",
+    "+Y": "-Y",
+    "-Y": "+Y",
+    "+X": "-X",
+    "-X": "+X",
 }
-Z_UP_VIEW_POSES = {
-    "front": CameraPose("front", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
-    "back": CameraPose("back", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
-    "left": CameraPose("left", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
-    "right": CameraPose("right", np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
-    "top": CameraPose("top", np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])),
-    "bottom": CameraPose("bottom", np.array([0.0, 0.0, -1.0]), np.array([0.0, 1.0, 0.0])),
+DEFAULT_FRONT_AXIS_BY_UP_AXIS = {
+    "+Z": "-Y",
+    "-Z": "+Y",
+    "+Y": "+Z",
+    "-Y": "-Z",
+    "+X": "-Z",
+    "-X": "+Z",
 }
-NEGATIVE_Z_UP_VIEW_POSES = {
-    "front": CameraPose("front", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
-    "back": CameraPose("back", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
-    "left": CameraPose("left", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 0.0, -1.0])),
-    "right": CameraPose("right", np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, -1.0])),
-    "top": CameraPose("top", np.array([0.0, 0.0, -1.0]), np.array([0.0, -1.0, 0.0])),
-    "bottom": CameraPose("bottom", np.array([0.0, 0.0, 1.0]), np.array([0.0, -1.0, 0.0])),
-}
-X_UP_VIEW_POSES = {
-    "front": CameraPose("front", np.array([0.0, 0.0, -1.0]), np.array([1.0, 0.0, 0.0])),
-    "back": CameraPose("back", np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0])),
-    "left": CameraPose("left", np.array([0.0, -1.0, 0.0]), np.array([1.0, 0.0, 0.0])),
-    "right": CameraPose("right", np.array([0.0, 1.0, 0.0]), np.array([1.0, 0.0, 0.0])),
-    "top": CameraPose("top", np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
-    "bottom": CameraPose("bottom", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 0.0, -1.0])),
-}
-NEGATIVE_X_UP_VIEW_POSES = {
-    "front": CameraPose("front", np.array([0.0, 0.0, 1.0]), np.array([-1.0, 0.0, 0.0])),
-    "back": CameraPose("back", np.array([0.0, 0.0, -1.0]), np.array([-1.0, 0.0, 0.0])),
-    "left": CameraPose("left", np.array([0.0, -1.0, 0.0]), np.array([-1.0, 0.0, 0.0])),
-    "right": CameraPose("right", np.array([0.0, 1.0, 0.0]), np.array([-1.0, 0.0, 0.0])),
-    "top": CameraPose("top", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 0.0, -1.0])),
-    "bottom": CameraPose("bottom", np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
-}
-UP_AXIS_VIEW_POSES = {
-    "+Z": Z_UP_VIEW_POSES,
-    "-Z": NEGATIVE_Z_UP_VIEW_POSES,
-    "+Y": Y_UP_VIEW_POSES,
-    "-Y": NEGATIVE_Y_UP_VIEW_POSES,
-    "+X": X_UP_VIEW_POSES,
-    "-X": NEGATIVE_X_UP_VIEW_POSES,
-}
-VIEW_POSES = Y_UP_VIEW_POSES
 
 
-def canonical_up_axis(up_axis: str) -> str:
+def canonical_axis(axis: str, *, kind: str = "axis") -> str:
     aliases = {
         "z_up": "+Z",
         "+z": "+Z",
@@ -132,18 +101,82 @@ def canonical_up_axis(up_axis: str) -> str:
         "x": "+X",
         "-x": "-X",
     }
-    text = str(up_axis).strip()
+    text = str(axis).strip()
     canonical = aliases.get(text.lower(), text.upper())
-    if canonical not in UP_AXIS_VIEW_POSES:
-        raise ValueError(f"Unknown up axis: {up_axis}")
+    if canonical not in AXIS_VECTORS:
+        raise ValueError(f"Unknown {kind}: {axis}")
     return canonical
 
 
-def view_pose(view: str, up_axis: str = "+Z") -> CameraPose:
-    poses = UP_AXIS_VIEW_POSES[canonical_up_axis(up_axis)]
-    if view not in poses:
+def canonical_up_axis(up_axis: str) -> str:
+    return canonical_axis(up_axis, kind="up axis")
+
+
+def canonical_front_axis(front_axis: str) -> str:
+    return canonical_axis(front_axis, kind="front axis")
+
+
+def opposite_axis(axis: str) -> str:
+    return OPPOSITE_AXES[canonical_axis(axis)]
+
+
+def valid_front_axes(up_axis: str) -> list[str]:
+    up = canonical_up_axis(up_axis)
+    excluded = {up, OPPOSITE_AXES[up]}
+    return [axis for axis in AXES if axis not in excluded]
+
+
+def default_front_axis(up_axis: str) -> str:
+    return DEFAULT_FRONT_AXIS_BY_UP_AXIS[canonical_up_axis(up_axis)]
+
+
+def resolve_front_axis(up_axis: str, front_axis: str | None = None) -> str:
+    up = canonical_up_axis(up_axis)
+    if front_axis is None or str(front_axis).strip().lower() in {"", "auto", "default"}:
+        front = default_front_axis(up)
+    else:
+        front = canonical_front_axis(front_axis)
+    if front not in valid_front_axes(up):
+        valid = ", ".join(valid_front_axes(up))
+        raise ValueError(f"front_axis {front} is invalid for up_axis {up}; choose one of: {valid}")
+    return front
+
+
+def axis_vector(axis: str) -> np.ndarray:
+    return AXIS_VECTORS[canonical_axis(axis)].copy()
+
+
+def view_pose(view: str, up_axis: str = "+Z", front_axis: str | None = None) -> CameraPose:
+    if view not in VIEW_ORDER:
         raise ValueError(f"Unknown view: {view}")
-    return poses[view]
+
+    up_name = canonical_up_axis(up_axis)
+    front_name = resolve_front_axis(up_name, front_axis)
+    up = axis_vector(up_name)
+    front = axis_vector(front_name)
+    right = np.cross(up, front).astype(np.float32)
+    top_up = (-front).astype(np.float32)
+
+    directions = {
+        "front": front,
+        "back": -front,
+        "left": -right,
+        "right": right,
+        "top": up,
+        "bottom": -up,
+    }
+    up_hints = {
+        "front": up,
+        "back": up,
+        "left": up,
+        "right": up,
+        "top": top_up,
+        "bottom": top_up,
+    }
+    return CameraPose(view, directions[view].astype(np.float32), up_hints[view].astype(np.float32))
+
+
+VIEW_POSES = {name: view_pose(name) for name in VIEW_ORDER}
 
 
 def parse_color(value: str | Sequence[float], fallback: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -208,7 +241,7 @@ class MeshRenderer:
 
     def render(self, mesh: MeshBatchItem, view: str, settings: RenderSettings) -> np.ndarray:
         vertices, faces, vertex_colors = self._prepare_mesh(mesh)
-        pose = view_pose(view, settings.up_axis)
+        pose = view_pose(view, settings.up_axis, settings.front_axis)
         projected, depths, camera_vertices, world_vertices, light_direction = self._project(vertices, pose, settings)
 
         image = np.zeros((settings.height, settings.width, 3), dtype=np.float32)
@@ -541,7 +574,7 @@ class NvdiffrastRenderer:
 
     def render(self, mesh: MeshBatchItem, view: str, settings: RenderSettings) -> np.ndarray:
         vertices, faces, vertex_colors = self._cpu_renderer._prepare_mesh(mesh)
-        pose = view_pose(view, settings.up_axis)
+        pose = view_pose(view, settings.up_axis, settings.front_axis)
         projected, depths, _camera_vertices, world_vertices, light_direction = self._cpu_renderer._project(
             vertices, pose, settings
         )

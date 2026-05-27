@@ -24,6 +24,7 @@ try:
         VIEW_ORDER,
         canonical_up_axis,
         parse_color,
+        resolve_front_axis,
         selected_view_names,
     )
 except ImportError:  # Allows running tests from this directory without package install.
@@ -38,6 +39,7 @@ except ImportError:  # Allows running tests from this directory without package 
         VIEW_ORDER,
         canonical_up_axis,
         parse_color,
+        resolve_front_axis,
         selected_view_names,
     )
 
@@ -68,7 +70,9 @@ DISPLAY_NAME = "3D View Render: Six Sides"
 CATEGORY = "3d/render"
 CAMERA_MODES = [CameraMode.ORTHOGRAPHIC.value, CameraMode.PERSPECTIVE.value]
 RENDERER_BACKENDS = ["cpu_preview", "f3d_optional", "blender_optional", "nvdiffrast_optional"]
+DEFAULT_RENDERER_BACKEND = "f3d_optional"
 UP_AXES = ["+Z", "-Z", "+Y", "-Y", "+X", "-X"]
+FRONT_AXES = UP_AXES
 MATRIX_LAYOUTS = ["3x2", "2x3", "6x1", "1x6", "auto"]
 MODEL_INPUT_TYPES = (
     "MESH",
@@ -92,6 +96,7 @@ def _build_settings(
     background_color: str,
     mesh_color: str,
     up_axis: str,
+    front_axis: str | None,
     fov_degrees: float,
     orthographic_scale: float,
     camera_distance: float,
@@ -99,11 +104,13 @@ def _build_settings(
 ) -> RenderSettings:
     mode = CameraMode(camera_mode)
     normalized_up_axis = canonical_up_axis(up_axis)
+    normalized_front_axis = resolve_front_axis(normalized_up_axis, front_axis)
     base = RenderSettings(
         width=int(resolution),
         height=int(resolution),
         camera_mode=mode,
         up_axis=normalized_up_axis,
+        front_axis=normalized_front_axis,
         fov_degrees=float(fov_degrees),
         orthographic_scale=float(orthographic_scale),
         camera_distance=float(camera_distance),
@@ -134,6 +141,7 @@ def _render(
     background_color: str,
     mesh_color: str,
     up_axis: str,
+    front_axis: str,
     matrix_layout: str,
     label_matrix: bool,
     save_to_output: bool,
@@ -149,6 +157,7 @@ def _render(
         background_color=background_color,
         mesh_color=mesh_color,
         up_axis=up_axis,
+        front_axis=front_axis,
         fov_degrees=fov_degrees,
         orthographic_scale=orthographic_scale,
         camera_distance=camera_distance,
@@ -330,11 +339,13 @@ def _format_render_info(
         "blender_optional": "Blender background renderer",
         "nvdiffrast_optional": "nvdiffrast CUDA renderer",
     }
+    resolved_front_axis = resolve_front_axis(settings.up_axis, settings.front_axis)
     lines = [
         f"renderer_backend={renderer_backend}",
         f"renderer_engine={engine_labels.get(renderer_backend, renderer_backend)}",
         f"camera_mode={settings.camera_mode.value}",
         f"up_axis={settings.up_axis}",
+        f"front_axis={resolved_front_axis}",
         f"resolution={settings.width}x{settings.height}",
         f"views={','.join(views)}",
     ]
@@ -647,7 +658,7 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
             "renderer_backend": (
                 RENDERER_BACKENDS,
                 {
-                    "default": "cpu_preview",
+                    "default": DEFAULT_RENDERER_BACKEND,
                     "tooltip": "cpu_preview has no extra deps. f3d_optional is free/BSD and can auto-install. blender_optional uses a local Blender install.",
                 },
             ),
@@ -684,6 +695,13 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
                 {
                     "default": "+Z",
                     "tooltip": "Model vertical axis. Choose +Z/-Z/+Y/-Y/+X/-X to match the asset's up direction.",
+                },
+            ),
+            "front_axis": (
+                FRONT_AXES,
+                {
+                    "default": "-Y",
+                    "tooltip": "Model front direction. The UI removes axes parallel to up_axis; backend validation rejects invalid pairs.",
                 },
             ),
             "matrix_layout": (
@@ -772,7 +790,7 @@ if COMFY_API_AVAILABLE:
                     IO.Combo.Input(
                         "renderer_backend",
                         options=RENDERER_BACKENDS,
-                        default="cpu_preview",
+                        default=DEFAULT_RENDERER_BACKEND,
                         tooltip="cpu_preview has no extra deps. f3d_optional is free/BSD and can auto-install. blender_optional uses a local Blender install.",
                     ),
                     IO.Boolean.Input(
@@ -802,6 +820,12 @@ if COMFY_API_AVAILABLE:
                         options=UP_AXES,
                         default="+Z",
                         tooltip="Model vertical axis. Choose +Z/-Z/+Y/-Y/+X/-X to match the asset's up direction.",
+                    ),
+                    IO.Combo.Input(
+                        "front_axis",
+                        options=FRONT_AXES,
+                        default="-Y",
+                        tooltip="Model front direction. The UI removes axes parallel to up_axis; backend validation rejects invalid pairs.",
                     ),
                     IO.Combo.Input(
                         "matrix_layout",
@@ -851,12 +875,13 @@ if COMFY_API_AVAILABLE:
             cls,
             model,
             resolution: int = 512,
-            renderer_backend: str = "cpu_preview",
+            renderer_backend: str = DEFAULT_RENDERER_BACKEND,
             auto_install_f3d: bool = False,
             blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             up_axis: str = "+Z",
+            front_axis: str = "-Y",
             matrix_layout: str = "3x2",
             label_matrix: bool = True,
             save_to_output: bool = True,
@@ -883,6 +908,7 @@ if COMFY_API_AVAILABLE:
                 max_faces=max_faces,
                 camera_mode=camera_mode,
                 up_axis=up_axis,
+                front_axis=front_axis,
                 matrix_layout=matrix_layout,
                 label_matrix=label_matrix,
                 save_to_output=save_to_output,
@@ -931,12 +957,13 @@ else:
             self,
             model,
             resolution: int = 512,
-            renderer_backend: str = "cpu_preview",
+            renderer_backend: str = DEFAULT_RENDERER_BACKEND,
             auto_install_f3d: bool = False,
             blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             up_axis: str = "+Z",
+            front_axis: str = "-Y",
             matrix_layout: str = "3x2",
             label_matrix: bool = True,
             save_to_output: bool = True,
@@ -963,6 +990,7 @@ else:
                 max_faces=max_faces,
                 camera_mode=camera_mode,
                 up_axis=up_axis,
+                front_axis=front_axis,
                 matrix_layout=matrix_layout,
                 label_matrix=label_matrix,
                 save_to_output=save_to_output,

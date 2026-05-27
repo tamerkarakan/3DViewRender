@@ -17,7 +17,9 @@ from renderer import (
     RenderSettings,
     canonical_up_axis,
     parse_color,
+    resolve_front_axis,
     selected_view_names,
+    valid_front_axes,
     view_pose,
 )
 from nodes import _file_type_from_model, _limit_faces, _mesh_batch_items
@@ -153,6 +155,19 @@ class MeshRendererTests(unittest.TestCase):
             pose = view_pose("top", axis)
             self.assertTrue(np.all(np.isfinite(pose.direction)))
             self.assertGreater(float(np.linalg.norm(pose.up)), 0.0)
+
+    def test_front_axis_excludes_parallel_up_axis_pairs(self):
+        self.assertEqual(valid_front_axes("+Y"), ["+Z", "-Z", "+X", "-X"])
+        self.assertEqual(resolve_front_axis("+Z", None), "-Y")
+        self.assertEqual(resolve_front_axis("+Y", "auto"), "+Z")
+        with self.assertRaisesRegex(ValueError, "front_axis -Y is invalid for up_axis \\+Y"):
+            resolve_front_axis("+Y", "-Y")
+
+    def test_front_axis_controls_side_direction(self):
+        pose = view_pose("right", "+Z", "-Y")
+
+        np.testing.assert_allclose(pose.direction, np.array([1.0, 0.0, 0.0], dtype=np.float32))
+        np.testing.assert_allclose(pose.up, np.array([0.0, 0.0, 1.0], dtype=np.float32))
 
     def test_z_up_side_view_keeps_z_axis_upright(self):
         renderer = MeshRenderer()

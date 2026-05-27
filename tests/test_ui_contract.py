@@ -34,7 +34,7 @@ class UiContractTests(unittest.TestCase):
             required["renderer_backend"][0],
             ["cpu_preview", "f3d_optional", "blender_optional", "nvdiffrast_optional"],
         )
-        self.assertEqual(required["renderer_backend"][1]["default"], "cpu_preview")
+        self.assertEqual(required["renderer_backend"][1]["default"], "f3d_optional")
         self.assertEqual(required["auto_install_f3d"][1]["default"], False)
         self.assertTrue(required["auto_install_f3d"][1]["advanced"])
         self.assertEqual(required["blender_path"][1]["default"], "")
@@ -43,6 +43,8 @@ class UiContractTests(unittest.TestCase):
         self.assertEqual(required["camera_mode"][1]["default"], "orthographic")
         self.assertEqual(required["up_axis"][0], ["+Z", "-Z", "+Y", "-Y", "+X", "-X"])
         self.assertEqual(required["up_axis"][1]["default"], "+Z")
+        self.assertEqual(required["front_axis"][0], ["+Z", "-Z", "+Y", "-Y", "+X", "-X"])
+        self.assertEqual(required["front_axis"][1]["default"], "-Y")
         self.assertEqual(required["matrix_layout"][0], ["3x2", "2x3", "6x1", "1x6", "auto"])
         self.assertEqual(required["matrix_layout"][1]["default"], "3x2")
         self.assertEqual(required["label_matrix"][1]["default"], True)
@@ -69,6 +71,7 @@ class UiContractTests(unittest.TestCase):
         self.assertIn("renderer_backend=cpu_preview", info)
         self.assertIn("renderer_engine=MeshRenderer CPU rasterizer", info)
         self.assertIn("up_axis=+Z", info)
+        self.assertIn("front_axis=-Y", info)
         self.assertIn("views=right", info)
         self.assertIn("matrix_layout=3x2", info)
         self.assertIn("save_to_output=true", info)
@@ -85,6 +88,7 @@ class UiContractTests(unittest.TestCase):
                 background_color="#000000",
                 mesh_color="#FFFFFF",
                 up_axis="z_up",
+                front_axis="auto",
                 fov_degrees=45.0,
                 orthographic_scale=1.2,
                 camera_distance=2.4,
@@ -93,11 +97,35 @@ class UiContractTests(unittest.TestCase):
             "+Z",
         )
 
+    def test_build_settings_rejects_invalid_front_axis(self):
+        with self.assertRaisesRegex(ValueError, "front_axis -Y is invalid for up_axis \\+Y"):
+            nodes._build_settings(
+                resolution=64,
+                camera_mode="orthographic",
+                background_color="#000000",
+                mesh_color="#FFFFFF",
+                up_axis="+Y",
+                front_axis="-Y",
+                fov_degrees=45.0,
+                orthographic_scale=1.2,
+                camera_distance=2.4,
+                shading=False,
+            )
+
     def test_render_info_ui_is_frontend_text_payload(self):
         self.assertEqual(
             nodes._render_info_ui("renderer_backend=cpu_preview\nup_axis=+Z"),
             {"text": ["renderer_backend=cpu_preview", "up_axis=+Z"]},
         )
+
+    def test_frontend_axis_filter_extension_is_packaged(self):
+        script = Path(__file__).resolve().parents[1] / "web" / "axis_filter.js"
+
+        self.assertTrue(script.exists())
+        text = script.read_text(encoding="utf-8")
+        self.assertIn("up_axis", text)
+        self.assertIn("front_axis", text)
+        self.assertIn("validFrontAxes", text)
 
 
 if __name__ == "__main__":

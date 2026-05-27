@@ -14,9 +14,9 @@ from typing import Iterable
 import numpy as np
 
 try:
-    from .renderer import CameraMode, RenderSettings, RenderedView, view_pose
+    from .renderer import CameraMode, RenderSettings, RenderedView, resolve_front_axis, view_pose
 except ImportError:
-    from renderer import CameraMode, RenderSettings, RenderedView, view_pose  # type: ignore
+    from renderer import CameraMode, RenderSettings, RenderedView, resolve_front_axis, view_pose  # type: ignore
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,7 @@ class F3DRenderer:
         engine.options["render.effect.antialiasing.enable"] = True
         engine.scene.add(str(model_path))
 
-        pose = view_pose(view, settings.up_axis)
+        pose = view_pose(view, settings.up_axis, settings.front_axis)
         direction = _normalize(pose.direction)
         up = _normalize(pose.up)
         distance = max(bounds.extent * float(settings.camera_distance), bounds.extent * 1.5, 0.25)
@@ -255,6 +255,8 @@ def _write_blender_config(
 ) -> None:
     import json
 
+    resolved_front_axis = resolve_front_axis(settings.up_axis, settings.front_axis)
+    poses = {name: view_pose(name, settings.up_axis, resolved_front_axis) for name in view_names}
     config = {
         "model_path": str(model_path),
         "views": view_names,
@@ -262,6 +264,14 @@ def _write_blender_config(
         "resolution": int(settings.width),
         "camera_mode": settings.camera_mode.value,
         "up_axis": settings.up_axis,
+        "front_axis": resolved_front_axis,
+        "view_poses": {
+            name: {
+                "direction": [float(value) for value in poses[name].direction],
+                "up": [float(value) for value in poses[name].up],
+            }
+            for name in view_names
+        },
         "background_color": list(settings.background_color),
         "mesh_color": list(settings.mesh_color),
         "fov_degrees": float(settings.fov_degrees),
@@ -287,58 +297,6 @@ import sys
 
 import bpy
 from mathutils import Matrix, Vector
-
-
-VIEW_POSES_BY_UP_AXIS = {
-    "+Y": {
-        "front": ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
-        "back": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
-        "left": ((-1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
-        "right": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
-        "top": ((0.0, 1.0, 0.0), (0.0, 0.0, -1.0)),
-        "bottom": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
-    },
-    "-Y": {
-        "front": ((0.0, 0.0, -1.0), (0.0, -1.0, 0.0)),
-        "back": ((0.0, 0.0, 1.0), (0.0, -1.0, 0.0)),
-        "left": ((-1.0, 0.0, 0.0), (0.0, -1.0, 0.0)),
-        "right": ((1.0, 0.0, 0.0), (0.0, -1.0, 0.0)),
-        "top": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
-        "bottom": ((0.0, 1.0, 0.0), (0.0, 0.0, -1.0)),
-    },
-    "+Z": {
-        "front": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
-        "back": ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
-        "left": ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
-        "right": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
-        "top": ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
-        "bottom": ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
-    },
-    "-Z": {
-        "front": ((0.0, 1.0, 0.0), (0.0, 0.0, -1.0)),
-        "back": ((0.0, -1.0, 0.0), (0.0, 0.0, -1.0)),
-        "left": ((-1.0, 0.0, 0.0), (0.0, 0.0, -1.0)),
-        "right": ((1.0, 0.0, 0.0), (0.0, 0.0, -1.0)),
-        "top": ((0.0, 0.0, -1.0), (0.0, -1.0, 0.0)),
-        "bottom": ((0.0, 0.0, 1.0), (0.0, -1.0, 0.0)),
-    },
-    "+X": {
-        "front": ((0.0, 0.0, -1.0), (1.0, 0.0, 0.0)),
-        "back": ((0.0, 0.0, 1.0), (1.0, 0.0, 0.0)),
-        "left": ((0.0, -1.0, 0.0), (1.0, 0.0, 0.0)),
-        "right": ((0.0, 1.0, 0.0), (1.0, 0.0, 0.0)),
-        "top": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
-        "bottom": ((-1.0, 0.0, 0.0), (0.0, 0.0, -1.0)),
-    },
-    "-X": {
-        "front": ((0.0, 0.0, 1.0), (-1.0, 0.0, 0.0)),
-        "back": ((0.0, 0.0, -1.0), (-1.0, 0.0, 0.0)),
-        "left": ((0.0, -1.0, 0.0), (-1.0, 0.0, 0.0)),
-        "right": ((0.0, 1.0, 0.0), (-1.0, 0.0, 0.0)),
-        "top": ((-1.0, 0.0, 0.0), (0.0, 0.0, -1.0)),
-        "bottom": ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
-    },
-}
 
 
 def import_model(path):
@@ -454,7 +412,9 @@ def render_views(cfg):
     output_dir = cfg["output_dir"]
     os.makedirs(output_dir, exist_ok=True)
     for name in cfg["views"]:
-        direction, up = VIEW_POSES_BY_UP_AXIS[cfg["up_axis"]][name]
+        pose = cfg["view_poses"][name]
+        direction = pose["direction"]
+        up = pose["up"]
         distance = max(float(cfg["camera_distance"]), 0.25)
         position = tuple(float(v) * distance for v in direction)
         look_at(camera, position, (0.0, 0.0, 0.0), up)
