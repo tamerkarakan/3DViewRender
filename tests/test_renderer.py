@@ -1,9 +1,12 @@
+import importlib.util
 import unittest
+import tempfile
+from pathlib import Path
 
 import numpy as np
 
 from renderer import CameraMode, MeshBatchItem, MeshRenderer, RenderSettings, parse_color, selected_view_names
-from nodes import _mesh_batch_items
+from nodes import _file_type_from_model, _mesh_batch_items
 
 
 def make_box(width=1.0, height=0.6, depth=0.3):
@@ -110,6 +113,35 @@ class MeshRendererTests(unittest.TestCase):
         fake.faces = np.array([[0, 1, 2]], dtype=np.int64)
 
         items = _mesh_batch_items(fake)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].vertices.shape, (3, 3))
+        self.assertEqual(items[0].faces.shape, (1, 3))
+
+    def test_file_type_detection_ignores_string_format_method(self):
+        self.assertIsNone(_file_type_from_model("mesh.obj"))
+
+        fake_file = type("FakeFile3D", (), {})()
+        fake_file.format = "glb"
+        self.assertEqual(_file_type_from_model(fake_file), "glb")
+
+    @unittest.skipUnless(importlib.util.find_spec("trimesh"), "trimesh is not installed")
+    def test_accepts_string_model_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "triangle.obj"
+            path.write_text(
+                "\n".join(
+                    [
+                        "v 0 0 0",
+                        "v 1 0 0",
+                        "v 0 1 0",
+                        "f 1 2 3",
+                    ]
+                ),
+                encoding="ascii",
+            )
+
+            items = _mesh_batch_items(str(path))
 
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0].vertices.shape, (3, 3))

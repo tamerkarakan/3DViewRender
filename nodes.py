@@ -201,9 +201,18 @@ def _mesh_items_from_file_like(model: Any) -> list[MeshBatchItem] | None:
     except Exception as exc:
         raise RuntimeError("trimesh is required to render FILE_3D or path inputs.") from exc
 
-    file_type = getattr(model, "format", None) or None
+    file_type = _file_type_from_model(model)
     loaded = trimesh.load(source, file_type=file_type, force="scene")
     return _items_from_trimesh(loaded)
+
+
+def _file_type_from_model(model: Any) -> str | None:
+    if isinstance(model, str):
+        return None
+    file_type = getattr(model, "format", None)
+    if isinstance(file_type, str) and file_type.strip():
+        return file_type
+    return None
 
 
 def _file_like_source(model: Any) -> Any | None:
