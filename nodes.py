@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+import tempfile
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+try:
+    from .external_renderers import BlenderRenderer, F3DRenderer
+except ImportError:
+    from external_renderers import BlenderRenderer, F3DRenderer  # type: ignore
 
 try:
     from .renderer import (
         CameraMode,
         MeshBatchItem,
         MeshRenderer,
+        NvdiffrastRenderer,
         RenderSettings,
         VIEW_ORDER,
         parse_color,
@@ -20,6 +28,7 @@ except ImportError:  # Allows running tests from this directory without package 
         CameraMode,
         MeshBatchItem,
         MeshRenderer,
+        NvdiffrastRenderer,
         RenderSettings,
         VIEW_ORDER,
         parse_color,
@@ -52,6 +61,7 @@ NODE_ID = "T3DViewRenderSixSides"
 DISPLAY_NAME = "3D View Render: Six Sides"
 CATEGORY = "3d/render"
 CAMERA_MODES = [CameraMode.ORTHOGRAPHIC.value, CameraMode.PERSPECTIVE.value]
+RENDERER_BACKENDS = ["cpu_preview", "f3d_optional", "blender_optional", "nvdiffrast_optional"]
 MODEL_INPUT_TYPES = (
     "MESH",
     "TRIMESH",
@@ -100,6 +110,9 @@ def _render(
     model: Any,
     resolution: int,
     max_faces: int,
+    renderer_backend: str,
+    auto_install_f3d: bool,
+    blender_path: str,
     camera_mode: str,
     front: bool,
     back: bool,
@@ -125,11 +138,28 @@ def _render(
         shading=shading,
     )
     views = selected_view_names(front=front, back=back, left=left, right=right, top=top, bottom=bottom)
-    renderer = MeshRenderer()
+    if renderer_backend in {"f3d_optional", "blender_optional"}:
+        return _render_external(
+            model=model,
+            views=views,
+            settings=settings,
+            renderer_backend=renderer_backend,
+            auto_install_f3d=auto_install_f3d,
+            blender_path=blender_path,
+        )
+
+    if renderer_backend == "nvdiffrast_optional":
+        renderer = NvdiffrastRenderer()
+        mesh_max_faces = 0
+    elif renderer_backend == "cpu_preview":
+        renderer = MeshRenderer()
+        mesh_max_faces = max_faces
+    else:
+        raise ValueError(f"Unknown renderer backend: {renderer_backend}")
 
     images: list[np.ndarray] = []
     labels: list[str] = []
-    for batch_index, item in enumerate(_mesh_batch_items(model, max_faces=max_faces)):
+    for batch_index, item in enumerate(_mesh_batch_items(model, max_faces=mesh_max_faces)):
         for rendered in renderer.render_views(item, views, settings):
             images.append(rendered.image.astype(np.float32, copy=False))
             labels.append(f"{batch_index}:{rendered.name}")
@@ -143,6 +173,75 @@ def _render(
         raise RuntimeError("ComfyUI torch runtime is required to return IMAGE tensors.") from exc
 
     return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels)
+
+
+def _render_external(
+    *,
+    model: Any,
+    views: list[str],
+    settings: RenderSettings,
+    renderer_backend: str,
+    auto_install_f3d: bool,
+    blender_path: str,
+) -> tuple[Any, str]:
+    try:
+        import torch
+    except Exception as exc:
+        raise RuntimeError("ComfyUI torch runtime is required to return IMAGE tensors.") from exc
+
+    paths, cleanup = _external_model_paths(model)
+    try:
+        if renderer_backend == "f3d_optional":
+            renderer = F3DRenderer(auto_install=auto_install_f3d)
+        elif renderer_backend == "blender_optional":
+            renderer = BlenderRenderer(blender_path=blender_path)
+        else:
+            raise ValueError(f"Unknown external renderer backend: {renderer_backend}")
+
+        images: list[np.ndarray] = []
+        labels: list[str] = []
+        for batch_index, path in enumerate(paths):
+            for rendered in renderer.render_file_views(path, views, settings):
+                images.append(rendered.image.astype(np.float32, copy=False))
+                labels.append(f"{batch_index}:{rendered.name}")
+        if not images:
+            raise ValueError("No renderable mesh items were found.")
+        return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels)
+    finally:
+        if cleanup is not None:
+            cleanup.cleanup()
+
+
+def _external_model_paths(model: Any) -> tuple[list[str], tempfile.TemporaryDirectory[str] | None]:
+    source = _file_like_source(model)
+    if isinstance(source, str):
+        return [_resolve_3d_path(source)], None
+
+    temp_dir = tempfile.TemporaryDirectory(prefix="3dviewrender_model_")
+    root = Path(temp_dir.name)
+    if source is not None:
+        suffix = f".{_file_type_from_model(model) or 'glb'}"
+        path = root / f"model{suffix}"
+        data = source if isinstance(source, (bytes, bytearray)) else bytes(source)
+        path.write_bytes(data)
+        return [str(path)], temp_dir
+
+    try:
+        import trimesh
+    except Exception as exc:
+        temp_dir.cleanup()
+        raise RuntimeError("trimesh is required to export in-memory mesh inputs for external renderers.") from exc
+
+    paths: list[str] = []
+    try:
+        for index, item in enumerate(_mesh_batch_items(model, max_faces=0)):
+            path = root / f"mesh_{index}.obj"
+            trimesh.Trimesh(vertices=item.vertices, faces=item.faces, process=False).export(path)
+            paths.append(str(path))
+    except Exception:
+        temp_dir.cleanup()
+        raise
+    return paths, temp_dir
 
 
 def _mesh_batch_items(mesh: Any, max_faces: int | None = None) -> list[MeshBatchItem]:
@@ -338,6 +437,29 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
         "required": {
             "model": (",".join(MODEL_INPUT_TYPES), {"tooltip": "MESH, TRIMESH, MESHWITHVOXEL, File3D, or 3D file path."}),
             "resolution": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 64}),
+            "renderer_backend": (
+                RENDERER_BACKENDS,
+                {
+                    "default": "cpu_preview",
+                    "tooltip": "cpu_preview has no extra deps. f3d_optional is free/BSD and can auto-install. blender_optional uses a local Blender install.",
+                },
+            ),
+            "auto_install_f3d": (
+                "BOOLEAN",
+                {
+                    "default": False,
+                    "advanced": True,
+                    "tooltip": "When using f3d_optional, allow one-time pip install f3d if missing.",
+                },
+            ),
+            "blender_path": (
+                "STRING",
+                {
+                    "default": "",
+                    "advanced": True,
+                    "tooltip": "Optional Blender folder or blender.exe path. Leave blank to auto-detect PATH/common install folders.",
+                },
+            ),
             "max_faces": (
                 "INT",
                 {
@@ -403,6 +525,24 @@ if COMFY_API_AVAILABLE:
                 inputs=[
                     _model_input(),
                     IO.Int.Input("resolution", default=512, min=64, max=4096, step=64),
+                    IO.Combo.Input(
+                        "renderer_backend",
+                        options=RENDERER_BACKENDS,
+                        default="cpu_preview",
+                        tooltip="cpu_preview has no extra deps. f3d_optional is free/BSD and can auto-install. blender_optional uses a local Blender install.",
+                    ),
+                    IO.Boolean.Input(
+                        "auto_install_f3d",
+                        default=False,
+                        advanced=True,
+                        tooltip="When using f3d_optional, allow one-time pip install f3d if missing.",
+                    ),
+                    IO.String.Input(
+                        "blender_path",
+                        default="",
+                        advanced=True,
+                        tooltip="Optional Blender folder or blender.exe path. Leave blank to auto-detect PATH/common install folders.",
+                    ),
                     IO.Int.Input(
                         "max_faces",
                         default=10000,
@@ -437,6 +577,9 @@ if COMFY_API_AVAILABLE:
             cls,
             model,
             resolution: int = 512,
+            renderer_backend: str = "cpu_preview",
+            auto_install_f3d: bool = False,
+            blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             front: bool = True,
@@ -455,6 +598,9 @@ if COMFY_API_AVAILABLE:
             images, names = _render(
                 model=model,
                 resolution=resolution,
+                renderer_backend=renderer_backend,
+                auto_install_f3d=auto_install_f3d,
+                blender_path=blender_path,
                 max_faces=max_faces,
                 camera_mode=camera_mode,
                 front=front,
@@ -500,6 +646,9 @@ else:
             self,
             model,
             resolution: int = 512,
+            renderer_backend: str = "cpu_preview",
+            auto_install_f3d: bool = False,
+            blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             front: bool = True,
@@ -518,6 +667,9 @@ else:
             return _render(
                 model=model,
                 resolution=resolution,
+                renderer_backend=renderer_backend,
+                auto_install_f3d=auto_install_f3d,
+                blender_path=blender_path,
                 max_faces=max_faces,
                 camera_mode=camera_mode,
                 front=front,

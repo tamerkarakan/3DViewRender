@@ -304,6 +304,107 @@ class MeshRenderer:
         return abs(float(area)) <= 1e-5
 
 
+class NvdiffrastRenderer:
+    def __init__(self, device: str | None = None) -> None:
+        try:
+            import torch
+            import nvdiffrast.torch as dr
+        except Exception as exc:
+            raise RuntimeError("nvdiffrast backend requires torch and nvdiffrast to be installed.") from exc
+        if device is None:
+            if not torch.cuda.is_available():
+                raise RuntimeError("nvdiffrast backend requires a CUDA-capable torch runtime.")
+            device = "cuda"
+        self._torch = torch
+        self._dr = dr
+        self._device = device
+        self._ctx = dr.RasterizeCudaContext(device=device)
+        self._cpu_renderer = MeshRenderer()
+
+    def render_views(
+        self,
+        mesh: MeshBatchItem,
+        views: Iterable[str],
+        settings: RenderSettings,
+    ) -> list[RenderedView]:
+        view_names = list(views)
+        if not view_names:
+            raise ValueError("Select at least one render side.")
+        return [RenderedView(name, self.render(mesh, name, settings)) for name in view_names]
+
+    def render(self, mesh: MeshBatchItem, view: str, settings: RenderSettings) -> np.ndarray:
+        if view not in VIEW_POSES:
+            raise ValueError(f"Unknown view: {view}")
+
+        vertices, faces, vertex_colors = self._cpu_renderer._prepare_mesh(mesh)
+        pose = VIEW_POSES[view]
+        projected, depths, _camera_vertices, world_vertices, light_direction = self._cpu_renderer._project(
+            vertices, pose, settings
+        )
+        valid = np.all(depths[faces] > 0.0, axis=1)
+        faces = faces[valid]
+        if faces.shape[0] == 0:
+            image = np.zeros((settings.height, settings.width, 3), dtype=np.float32)
+            image[:, :] = np.asarray(settings.background_color, dtype=np.float32)
+            return image
+
+        x_ndc = projected[:, 0] / max(settings.width - 1, 1) * 2.0 - 1.0
+        y_ndc = 1.0 - projected[:, 1] / max(settings.height - 1, 1) * 2.0
+        depth_min = float(np.min(depths[faces]))
+        depth_max = float(np.max(depths[faces]))
+        depth_span = max(depth_max - depth_min, 1e-6)
+        z_ndc = ((depths - depth_min) / depth_span) * 2.0 - 1.0
+        clip = np.stack([x_ndc, y_ndc, z_ndc, np.ones_like(x_ndc)], axis=1).astype(np.float32)
+
+        torch = self._torch
+        dr = self._dr
+        vertices_clip = torch.from_numpy(clip).to(self._device).unsqueeze(0).contiguous()
+        faces_t = torch.from_numpy(faces.astype(np.int32, copy=False)).to(self._device).contiguous()
+        rast, _ = dr.rasterize(self._ctx, vertices_clip, faces_t, (settings.height, settings.width))
+        mask = (rast[..., -1:] > 0).float()
+
+        base_color = np.asarray(settings.mesh_color, dtype=np.float32)
+        if vertex_colors is not None:
+            colors_np = vertex_colors.astype(np.float32, copy=False)
+            colors_t = torch.from_numpy(colors_np).to(self._device).unsqueeze(0).contiguous()
+            color = dr.interpolate(colors_t, rast, faces_t)[0]
+        else:
+            color = torch.ones(
+                (1, settings.height, settings.width, 3),
+                dtype=torch.float32,
+                device=self._device,
+            ) * torch.tensor(base_color, dtype=torch.float32, device=self._device)
+
+        if settings.shading:
+            shade_np = _face_shades(world_vertices, faces, light_direction, settings.ambient)
+            shade_t = torch.from_numpy(shade_np[:, None]).to(self._device).unsqueeze(0).contiguous()
+            face_attr_t = torch.arange(faces.shape[0], dtype=torch.int32, device=self._device)
+            face_attr_t = face_attr_t[:, None].repeat(1, 3).contiguous()
+            color = color * dr.interpolate(shade_t, rast, face_attr_t)[0]
+
+        background = torch.tensor(settings.background_color, dtype=torch.float32, device=self._device)
+        image = color * mask + background.reshape(1, 1, 1, 3) * (1.0 - mask)
+        image = dr.antialias(image, rast, vertices_clip, faces_t)
+        return np.clip(image[0].detach().cpu().numpy(), 0.0, 1.0).astype(np.float32)
+
+
+def _face_shades(
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    light_direction: np.ndarray,
+    ambient: float,
+) -> np.ndarray:
+    triangles = vertices[faces]
+    edge_a = triangles[:, 1] - triangles[:, 0]
+    edge_b = triangles[:, 2] - triangles[:, 0]
+    normals = np.cross(edge_a, edge_b)
+    lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+    normals = np.divide(normals, np.maximum(lengths, 1e-12), out=np.zeros_like(normals), where=lengths > 0)
+    diffuse = np.abs(normals @ _normalize(light_direction))
+    ambient = _clamp(float(ambient))
+    return (ambient + (1.0 - ambient) * diffuse).astype(np.float32)
+
+
 def _normalize(vector: np.ndarray) -> np.ndarray:
     norm = float(np.linalg.norm(vector))
     if norm <= 1e-12:

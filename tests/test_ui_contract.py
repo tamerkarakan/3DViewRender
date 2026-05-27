@@ -26,6 +26,15 @@ class UiContractTests(unittest.TestCase):
         self.assertIn("MESHWITHVOXEL", required["model"][0])
         self.assertIn("FILE_3D_GLB", required["model"][0])
         self.assertIn("STRING", required["model"][0])
+        self.assertEqual(
+            required["renderer_backend"][0],
+            ["cpu_preview", "f3d_optional", "blender_optional", "nvdiffrast_optional"],
+        )
+        self.assertEqual(required["renderer_backend"][1]["default"], "cpu_preview")
+        self.assertEqual(required["auto_install_f3d"][1]["default"], False)
+        self.assertTrue(required["auto_install_f3d"][1]["advanced"])
+        self.assertEqual(required["blender_path"][1]["default"], "")
+        self.assertTrue(required["blender_path"][1]["advanced"])
         self.assertEqual(required["camera_mode"][0], ["orthographic", "perspective"])
         self.assertEqual(required["camera_mode"][1]["default"], "orthographic")
         self.assertEqual(required["resolution"][1]["default"], 512)
