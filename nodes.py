@@ -189,10 +189,12 @@ def _render(
     if not images:
         raise ValueError("No renderable mesh items were found.")
 
-    labels = [_view_output_name(batch_index, batch_count, view) for batch_index, view in label_views]
+    labels = [_view_display_name(batch_index, batch_count, view, settings.up_axis) for batch_index, view in label_views]
+    save_names = [_view_file_stem(batch_index, batch_count, view) for batch_index, view in label_views]
     return _finalize_render(
         images=images,
         labels=labels,
+        save_names=save_names,
         renderer_backend=renderer_backend,
         settings=settings,
         views=views,
@@ -237,10 +239,12 @@ def _render_external(
                 label_views.append((batch_index, rendered.name))
         if not images:
             raise ValueError("No renderable mesh items were found.")
-        labels = [_view_output_name(batch_index, batch_count, view) for batch_index, view in label_views]
+        labels = [_view_display_name(batch_index, batch_count, view, settings.up_axis) for batch_index, view in label_views]
+        save_names = [_view_file_stem(batch_index, batch_count, view) for batch_index, view in label_views]
         return _finalize_render(
             images=images,
             labels=labels,
+            save_names=save_names,
             renderer_backend=renderer_backend,
             settings=settings,
             views=views,
@@ -260,6 +264,7 @@ def _finalize_render(
     *,
     images: list[np.ndarray],
     labels: list[str],
+    save_names: list[str],
     renderer_backend: str,
     settings: RenderSettings,
     views: list[str],
@@ -294,8 +299,8 @@ def _finalize_render(
     )
     saved_images = _save_render_outputs(
         images,
-        labels,
         contact_sheet,
+        save_names,
         save_to_output=save_to_output,
         filename_prefix=filename_prefix,
     )
@@ -333,6 +338,7 @@ def _format_render_info(
         f"up_axis={settings.up_axis}",
         f"resolution={settings.width}x{settings.height}",
         f"views={','.join(views)}",
+        f"axes={','.join(f'{view}:{_view_axis_label(view, settings.up_axis)}' for view in views)}",
     ]
     if matrix_layout is not None:
         lines.append(f"matrix_layout={matrix_layout}")
@@ -362,7 +368,39 @@ def _render_ui(render_info: str, saved_images: list[dict[str, str]]) -> dict[str
     return ui
 
 
-def _view_output_name(batch_index: int, batch_count: int, view: str) -> str:
+def _view_axis_label(view: str, up_axis: str) -> str:
+    axes_by_up = {
+        "z_up": {
+            "front": "-Y",
+            "back": "+Y",
+            "left": "-X",
+            "right": "+X",
+            "top": "+Z",
+            "bottom": "-Z",
+        },
+        "y_up": {
+            "front": "+Z",
+            "back": "-Z",
+            "left": "-X",
+            "right": "+X",
+            "top": "+Y",
+            "bottom": "-Y",
+        },
+    }
+    try:
+        return axes_by_up[up_axis][view]
+    except KeyError as exc:
+        raise ValueError(f"Unknown view/up axis combination: {view}/{up_axis}") from exc
+
+
+def _view_display_name(batch_index: int, batch_count: int, view: str, up_axis: str) -> str:
+    label = f"{view} ({_view_axis_label(view, up_axis)})"
+    if batch_count <= 1:
+        return label
+    return f"mesh{batch_index}_{label}"
+
+
+def _view_file_stem(batch_index: int, batch_count: int, view: str) -> str:
     if batch_count <= 1:
         return view
     return f"mesh{batch_index}_{view}"
@@ -377,8 +415,8 @@ def _safe_filename_piece(value: str) -> str:
 
 def _save_render_outputs(
     images: list[np.ndarray],
-    labels: list[str],
     contact_sheet: np.ndarray,
+    save_names: list[str],
     *,
     save_to_output: bool,
     filename_prefix: str,
@@ -395,8 +433,8 @@ def _save_render_outputs(
     output_dir = folder_paths.get_output_directory()
     prefix = filename_prefix.strip() or "3DViewRender/render"
     results = []
-    for image, label in zip(images, labels):
-        results.append(_save_png(Image, folder_paths, os, image, f"{prefix}_{_safe_filename_piece(label)}", output_dir))
+    for image, save_name in zip(images, save_names):
+        results.append(_save_png(Image, folder_paths, os, image, f"{prefix}_{_safe_filename_piece(save_name)}", output_dir))
     results.append(_save_png(Image, folder_paths, os, contact_sheet, f"{prefix}_matrix", output_dir))
     return results
 
@@ -693,7 +731,7 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
                 "BOOLEAN",
                 {
                     "default": True,
-                    "tooltip": "Draw each view name in the top-left corner of the matrix image using Pillow.",
+                    "tooltip": "Draw each view name and axis direction in the top-left corner of the matrix image using Pillow.",
                 },
             ),
             "save_to_output": (
@@ -808,7 +846,7 @@ if COMFY_API_AVAILABLE:
                     IO.Boolean.Input(
                         "label_matrix",
                         default=True,
-                        tooltip="Draw each view name in the top-left corner of the matrix image using Pillow.",
+                        tooltip="Draw each view name and axis direction in the top-left corner of the matrix image using Pillow.",
                     ),
                     IO.Boolean.Input(
                         "save_to_output",

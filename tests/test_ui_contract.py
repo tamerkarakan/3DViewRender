@@ -70,12 +70,18 @@ class UiContractTests(unittest.TestCase):
         self.assertIn("renderer_engine=MeshRenderer CPU rasterizer", info)
         self.assertIn("up_axis=z_up", info)
         self.assertIn("views=right", info)
+        self.assertIn("axes=right:+X", info)
         self.assertIn("matrix_layout=3x2", info)
         self.assertIn("save_to_output=true", info)
 
-    def test_single_batch_view_names_are_plain_side_names(self):
-        self.assertEqual(nodes._view_output_name(0, 1, "front"), "front")
-        self.assertEqual(nodes._view_output_name(2, 3, "front"), "mesh2_front")
+    def test_view_names_include_axis_labels_but_file_stems_stay_side_named(self):
+        self.assertEqual(nodes._view_axis_label("front", "z_up"), "-Y")
+        self.assertEqual(nodes._view_axis_label("top", "z_up"), "+Z")
+        self.assertEqual(nodes._view_axis_label("front", "y_up"), "+Z")
+        self.assertEqual(nodes._view_display_name(0, 1, "front", "z_up"), "front (-Y)")
+        self.assertEqual(nodes._view_display_name(2, 3, "front", "z_up"), "mesh2_front (-Y)")
+        self.assertEqual(nodes._view_file_stem(0, 1, "front"), "front")
+        self.assertEqual(nodes._view_file_stem(2, 3, "front"), "mesh2_front")
 
     def test_render_info_ui_is_frontend_text_payload(self):
         self.assertEqual(
