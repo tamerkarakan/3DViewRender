@@ -10,7 +10,7 @@ Compatibility target: ComfyUI `v0.22.0` V3 custom-node API. The package exports 
 
 Inputs:
 
-- `mesh`: ComfyUI `MESH`
+- `model`: ComfyUI `MESH`, `TRIMESH`, `MESHWITHVOXEL`, `FILE_3D*`, or a 3D file path string
 - `resolution`: square output image size
 - `camera_mode`: `orthographic` or `perspective`
 - `front`, `back`, `left`, `right`, `top`, `bottom`: side selection toggles

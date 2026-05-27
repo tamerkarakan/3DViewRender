@@ -22,8 +22,17 @@ class V3EntrypointContractTests(unittest.TestCase):
                     super().__init__(id=id, **kwargs)
                     self.options = options
 
+            class MultiTypeInput(Field):
+                def __init__(self, input_override, types=None, **kwargs):
+                    super().__init__(id=input_override.id, **kwargs)
+                    self.input_override = input_override
+                    self.types = types or []
+
             def make_type(input_cls=Field):
                 return type("T", (), {"Input": input_cls, "Output": Field})
+
+            def custom_type(name):
+                return type(name, (), {"io_type": name, "Input": Field, "Output": Field})
 
             class Schema:
                 def __init__(self, **kwargs):
@@ -51,6 +60,15 @@ class V3EntrypointContractTests(unittest.TestCase):
                 Boolean=make_type(),
                 Image=make_type(),
                 Combo=make_type(ComboInput),
+                MultiType=type("MultiType", (), {"Input": MultiTypeInput}),
+                Custom=custom_type,
+                File3DGLB=custom_type("FILE_3D_GLB"),
+                File3DGLTF=custom_type("FILE_3D_GLTF"),
+                File3DOBJ=custom_type("FILE_3D_OBJ"),
+                File3DFBX=custom_type("FILE_3D_FBX"),
+                File3DSTL=custom_type("FILE_3D_STL"),
+                File3DUSDZ=custom_type("FILE_3D_USDZ"),
+                File3DAny=custom_type("FILE_3D"),
             )
 
             comfy_api = types.ModuleType("comfy_api")
@@ -72,6 +90,7 @@ class V3EntrypointContractTests(unittest.TestCase):
             assert schema.category == "3d/render"
             for side in ("front", "back", "left", "right", "top", "bottom"):
                 assert side in input_ids
+            assert "model" in input_ids
             assert "camera_mode" in input_ids
             assert output_names == ["images", "view_names"]
             """

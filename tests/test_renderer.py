@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from renderer import CameraMode, MeshBatchItem, MeshRenderer, RenderSettings, parse_color, selected_view_names
+from nodes import _mesh_batch_items
 
 
 def make_box(width=1.0, height=0.6, depth=0.3):
@@ -101,6 +102,18 @@ class MeshRendererTests(unittest.TestCase):
         renderer = MeshRenderer()
         with self.assertRaisesRegex(ValueError, "Select at least one"):
             renderer.render_views(make_box(), [], RenderSettings(width=32, height=32))
+
+    def test_accepts_trimesh_like_objects(self):
+        FakeTrimesh = type("Trimesh", (), {"__module__": "trimesh.base"})
+        fake = FakeTrimesh()
+        fake.vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        fake.faces = np.array([[0, 1, 2]], dtype=np.int64)
+
+        items = _mesh_batch_items(fake)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].vertices.shape, (3, 3))
+        self.assertEqual(items[0].faces.shape, (1, 3))
 
 
 if __name__ == "__main__":

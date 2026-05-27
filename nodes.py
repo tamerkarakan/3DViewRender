@@ -52,6 +52,19 @@ NODE_ID = "T3DViewRenderSixSides"
 DISPLAY_NAME = "3D View Render: Six Sides"
 CATEGORY = "3d/render"
 CAMERA_MODES = [CameraMode.ORTHOGRAPHIC.value, CameraMode.PERSPECTIVE.value]
+MODEL_INPUT_TYPES = (
+    "MESH",
+    "TRIMESH",
+    "MESHWITHVOXEL",
+    "FILE_3D_GLB",
+    "FILE_3D_GLTF",
+    "FILE_3D_OBJ",
+    "FILE_3D_FBX",
+    "FILE_3D_STL",
+    "FILE_3D_USDZ",
+    "FILE_3D",
+    "STRING",
+)
 
 
 def _build_settings(
@@ -84,7 +97,7 @@ def _build_settings(
 
 def _render(
     *,
-    mesh: Any,
+    model: Any,
     resolution: int,
     camera_mode: str,
     front: bool,
@@ -115,7 +128,7 @@ def _render(
 
     images: list[np.ndarray] = []
     labels: list[str] = []
-    for batch_index, item in enumerate(_mesh_batch_items(mesh)):
+    for batch_index, item in enumerate(_mesh_batch_items(model)):
         for rendered in renderer.render_views(item, views, settings):
             images.append(rendered.image.astype(np.float32, copy=False))
             labels.append(f"{batch_index}:{rendered.name}")
@@ -132,8 +145,12 @@ def _render(
 
 
 def _mesh_batch_items(mesh: Any) -> list[MeshBatchItem]:
+    from_file = _mesh_items_from_file_like(mesh)
+    if from_file is not None:
+        return from_file
+
     if not hasattr(mesh, "vertices") or not hasattr(mesh, "faces"):
-        raise TypeError("Expected a ComfyUI MESH object with vertices and faces.")
+        raise TypeError("Expected a mesh object, trimesh object, File3D, or 3D file path.")
 
     vertices = _to_numpy(mesh.vertices)
     faces = _to_numpy(mesh.faces).astype(np.int64, copy=False)
@@ -171,6 +188,104 @@ def _mesh_batch_items(mesh: Any) -> list[MeshBatchItem]:
     return items
 
 
+def _mesh_items_from_file_like(model: Any) -> list[MeshBatchItem] | None:
+    if _looks_like_trimesh(model):
+        return _items_from_trimesh(model)
+
+    source = _file_like_source(model)
+    if source is None:
+        return None
+
+    try:
+        import trimesh
+    except Exception as exc:
+        raise RuntimeError("trimesh is required to render FILE_3D or path inputs.") from exc
+
+    file_type = getattr(model, "format", None) or None
+    loaded = trimesh.load(source, file_type=file_type, force="scene")
+    return _items_from_trimesh(loaded)
+
+
+def _file_like_source(model: Any) -> Any | None:
+    if isinstance(model, str):
+        text = model.strip()
+        return _resolve_3d_path(text) if text else None
+    if hasattr(model, "get_source"):
+        source = model.get_source()
+        if isinstance(source, str):
+            return source
+        return getattr(model, "get_data", lambda: source)()
+    if hasattr(model, "get_data") and hasattr(model, "format"):
+        return model.get_data()
+    return None
+
+
+def _resolve_3d_path(path: str) -> str:
+    import os
+
+    if os.path.isabs(path) or os.path.exists(path):
+        return path
+    try:
+        import folder_paths
+
+        roots = [
+            folder_paths.get_output_directory(),
+            folder_paths.get_input_directory(),
+            folder_paths.get_temp_directory(),
+        ]
+        for root in roots:
+            candidate = os.path.join(root, path)
+            if os.path.exists(candidate):
+                return candidate
+    except Exception:
+        pass
+    return path
+
+
+def _looks_like_trimesh(model: Any) -> bool:
+    module = getattr(model.__class__, "__module__", "")
+    name = getattr(model.__class__, "__name__", "")
+    return (
+        module.startswith("trimesh")
+        or name in {"Trimesh", "Scene"}
+        or (hasattr(model, "geometry") and hasattr(model, "dump"))
+    )
+
+
+def _items_from_trimesh(model: Any) -> list[MeshBatchItem]:
+    meshes = _flatten_trimesh(model)
+    items = []
+    for mesh in meshes:
+        vertices = np.asarray(mesh.vertices, dtype=np.float32)
+        faces = np.asarray(mesh.faces, dtype=np.int64)
+        colors = _trimesh_vertex_colors(mesh, vertices.shape[0])
+        if vertices.size and faces.size:
+            items.append(MeshBatchItem(vertices=vertices, faces=faces, vertex_colors=colors))
+    if not items:
+        raise ValueError("The 3D input did not contain renderable triangular geometry.")
+    return items
+
+
+def _flatten_trimesh(model: Any) -> list[Any]:
+    if hasattr(model, "geometry") and hasattr(model, "dump"):
+        dumped = model.dump(concatenate=False)
+        if isinstance(dumped, list):
+            return dumped
+        return [dumped]
+    return [model]
+
+
+def _trimesh_vertex_colors(mesh: Any, vertex_count: int) -> np.ndarray | None:
+    visual = getattr(mesh, "visual", None)
+    colors = getattr(visual, "vertex_colors", None)
+    if colors is None:
+        return None
+    colors = np.asarray(colors)
+    if colors.ndim != 2 or colors.shape[0] != vertex_count:
+        return None
+    return colors[:, :3]
+
+
 def _to_numpy(value: Any) -> np.ndarray | None:
     if value is None:
         return None
@@ -195,7 +310,7 @@ def _count_at(counts: np.ndarray | None, index: int, fallback: int) -> int:
 def _legacy_inputs() -> dict[str, dict[str, Any]]:
     return {
         "required": {
-            "mesh": ("MESH",),
+            "model": (",".join(MODEL_INPUT_TYPES), {"tooltip": "MESH, TRIMESH, MESHWITHVOXEL, File3D, or 3D file path."}),
             "resolution": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 64}),
             "camera_mode": (CAMERA_MODES, {"default": CameraMode.ORTHOGRAPHIC.value}),
             "front": ("BOOLEAN", {"default": True}),
@@ -216,6 +331,24 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
 
 if COMFY_API_AVAILABLE:
 
+    def _model_input():
+        return IO.MultiType.Input(
+            IO.Mesh.Input("model", tooltip="MESH, TRIMESH, MESHWITHVOXEL, File3D, or 3D file path."),
+            types=[
+                IO.Custom("TRIMESH"),
+                IO.Custom("MESHWITHVOXEL"),
+                IO.File3DGLB,
+                IO.File3DGLTF,
+                IO.File3DOBJ,
+                IO.File3DFBX,
+                IO.File3DSTL,
+                IO.File3DUSDZ,
+                IO.File3DAny,
+                IO.String,
+            ],
+        )
+
+
     class SixSideRender(IO.ComfyNode):  # type: ignore[misc]
         @classmethod
         def define_schema(cls):
@@ -229,9 +362,9 @@ if COMFY_API_AVAILABLE:
                     "orthographic mesh render",
                     "perspective mesh render",
                 ],
-                description="Render selected front/back/left/right/top/bottom views from a ComfyUI MESH.",
+                description="Render selected front/back/left/right/top/bottom views from a ComfyUI 3D model.",
                 inputs=[
-                    IO.Mesh.Input("mesh", tooltip="ComfyUI MESH to render."),
+                    _model_input(),
                     IO.Int.Input("resolution", default=512, min=64, max=4096, step=64),
                     IO.Combo.Input("camera_mode", options=CAMERA_MODES, default=CameraMode.ORTHOGRAPHIC.value),
                     IO.Boolean.Input("front", default=True, label_on="render", label_off="skip"),
@@ -256,7 +389,7 @@ if COMFY_API_AVAILABLE:
         @classmethod
         def execute(
             cls,
-            mesh,
+            model,
             resolution: int = 512,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             front: bool = True,
@@ -273,7 +406,7 @@ if COMFY_API_AVAILABLE:
             shading: bool = True,
         ):
             images, names = _render(
-                mesh=mesh,
+                model=model,
                 resolution=resolution,
                 camera_mode=camera_mode,
                 front=front,
@@ -317,7 +450,7 @@ else:
 
         def render(
             self,
-            mesh,
+            model,
             resolution: int = 512,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             front: bool = True,
@@ -334,7 +467,7 @@ else:
             shading: bool = True,
         ):
             return _render(
-                mesh=mesh,
+                model=model,
                 resolution=resolution,
                 camera_mode=camera_mode,
                 front=front,

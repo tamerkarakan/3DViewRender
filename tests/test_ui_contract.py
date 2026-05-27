@@ -21,7 +21,11 @@ class UiContractTests(unittest.TestCase):
     def test_legacy_ui_schema_exposes_camera_modes_and_render_controls(self):
         required = nodes.SixSideRender.INPUT_TYPES()["required"]
 
-        self.assertEqual(required["mesh"], ("MESH",))
+        self.assertIn("MESH", required["model"][0])
+        self.assertIn("TRIMESH", required["model"][0])
+        self.assertIn("MESHWITHVOXEL", required["model"][0])
+        self.assertIn("FILE_3D_GLB", required["model"][0])
+        self.assertIn("STRING", required["model"][0])
         self.assertEqual(required["camera_mode"][0], ["orthographic", "perspective"])
         self.assertEqual(required["camera_mode"][1]["default"], "orthographic")
         self.assertEqual(required["resolution"][1]["default"], 512)
