@@ -14,7 +14,9 @@ Inputs:
 - `resolution`: square output image size
 - `camera_mode`: `orthographic` or `perspective`
 - `front`, `back`, `left`, `right`, `top`, `bottom`: side selection toggles
-- advanced controls: `background_color`, `mesh_color`, `fov_degrees`, `orthographic_scale`, `camera_distance`, `shading`
+- advanced controls: `max_faces`, `background_color`, `mesh_color`, `fov_degrees`, `orthographic_scale`, `camera_distance`, `shading`
+
+`max_faces` defaults to `10000` because the fallback renderer is a CPU rasterizer. Large generated meshes can contain millions of triangles; this cap keeps ComfyUI responsive. Set it to `0` only for small meshes when full triangle coverage is required.
 
 Outputs:
 

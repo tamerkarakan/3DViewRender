@@ -29,6 +29,8 @@ class UiContractTests(unittest.TestCase):
         self.assertEqual(required["camera_mode"][0], ["orthographic", "perspective"])
         self.assertEqual(required["camera_mode"][1]["default"], "orthographic")
         self.assertEqual(required["resolution"][1]["default"], 512)
+        self.assertEqual(required["max_faces"][1]["default"], 10000)
+        self.assertTrue(required["max_faces"][1]["advanced"])
         self.assertIn("fov_degrees", required)
         self.assertIn("orthographic_scale", required)
         self.assertIn("camera_distance", required)

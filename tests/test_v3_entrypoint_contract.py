@@ -91,6 +91,7 @@ class V3EntrypointContractTests(unittest.TestCase):
             for side in ("front", "back", "left", "right", "top", "bottom"):
                 assert side in input_ids
             assert "model" in input_ids
+            assert "max_faces" in input_ids
             assert "camera_mode" in input_ids
             assert output_names == ["images", "view_names"]
             """

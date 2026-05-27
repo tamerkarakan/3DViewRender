@@ -99,6 +99,7 @@ def _render(
     *,
     model: Any,
     resolution: int,
+    max_faces: int,
     camera_mode: str,
     front: bool,
     back: bool,
@@ -128,7 +129,7 @@ def _render(
 
     images: list[np.ndarray] = []
     labels: list[str] = []
-    for batch_index, item in enumerate(_mesh_batch_items(model)):
+    for batch_index, item in enumerate(_mesh_batch_items(model, max_faces=max_faces)):
         for rendered in renderer.render_views(item, views, settings):
             images.append(rendered.image.astype(np.float32, copy=False))
             labels.append(f"{batch_index}:{rendered.name}")
@@ -144,8 +145,8 @@ def _render(
     return torch.from_numpy(np.stack(images, axis=0)).float(), "\n".join(labels)
 
 
-def _mesh_batch_items(mesh: Any) -> list[MeshBatchItem]:
-    from_file = _mesh_items_from_file_like(mesh)
+def _mesh_batch_items(mesh: Any, max_faces: int | None = None) -> list[MeshBatchItem]:
+    from_file = _mesh_items_from_file_like(mesh, max_faces=max_faces)
     if from_file is not None:
         return from_file
 
@@ -179,18 +180,21 @@ def _mesh_batch_items(mesh: Any) -> list[MeshBatchItem]:
         if vertex_colors is not None and index < vertex_colors.shape[0]:
             colors = vertex_colors[index, :vertex_count]
         items.append(
-            MeshBatchItem(
-                vertices=vertices[index, :vertex_count],
-                faces=faces[index, :face_count],
-                vertex_colors=colors,
+            _limit_faces(
+                MeshBatchItem(
+                    vertices=vertices[index, :vertex_count],
+                    faces=faces[index, :face_count],
+                    vertex_colors=colors,
+                ),
+                max_faces=max_faces,
             )
         )
     return items
 
 
-def _mesh_items_from_file_like(model: Any) -> list[MeshBatchItem] | None:
+def _mesh_items_from_file_like(model: Any, max_faces: int | None = None) -> list[MeshBatchItem] | None:
     if _looks_like_trimesh(model):
-        return _items_from_trimesh(model)
+        return _items_from_trimesh(model, max_faces=max_faces)
 
     source = _file_like_source(model)
     if source is None:
@@ -203,7 +207,7 @@ def _mesh_items_from_file_like(model: Any) -> list[MeshBatchItem] | None:
 
     file_type = _file_type_from_model(model)
     loaded = trimesh.load(source, file_type=file_type, force="scene")
-    return _items_from_trimesh(loaded)
+    return _items_from_trimesh(loaded, max_faces=max_faces)
 
 
 def _file_type_from_model(model: Any) -> str | None:
@@ -261,7 +265,7 @@ def _looks_like_trimesh(model: Any) -> bool:
     )
 
 
-def _items_from_trimesh(model: Any) -> list[MeshBatchItem]:
+def _items_from_trimesh(model: Any, max_faces: int | None = None) -> list[MeshBatchItem]:
     meshes = _flatten_trimesh(model)
     items = []
     for mesh in meshes:
@@ -269,10 +273,23 @@ def _items_from_trimesh(model: Any) -> list[MeshBatchItem]:
         faces = np.asarray(mesh.faces, dtype=np.int64)
         colors = _trimesh_vertex_colors(mesh, vertices.shape[0])
         if vertices.size and faces.size:
-            items.append(MeshBatchItem(vertices=vertices, faces=faces, vertex_colors=colors))
+            items.append(
+                _limit_faces(
+                    MeshBatchItem(vertices=vertices, faces=faces, vertex_colors=colors),
+                    max_faces=max_faces,
+                )
+            )
     if not items:
         raise ValueError("The 3D input did not contain renderable triangular geometry.")
     return items
+
+
+def _limit_faces(item: MeshBatchItem, max_faces: int | None) -> MeshBatchItem:
+    if max_faces is None or max_faces <= 0 or item.faces.shape[0] <= max_faces:
+        return item
+    step = item.faces.shape[0] / float(max_faces)
+    indices = np.floor(np.arange(max_faces, dtype=np.float64) * step).astype(np.int64)
+    return MeshBatchItem(vertices=item.vertices, faces=item.faces[indices], vertex_colors=item.vertex_colors)
 
 
 def _flatten_trimesh(model: Any) -> list[Any]:
@@ -321,6 +338,17 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
         "required": {
             "model": (",".join(MODEL_INPUT_TYPES), {"tooltip": "MESH, TRIMESH, MESHWITHVOXEL, File3D, or 3D file path."}),
             "resolution": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 64}),
+            "max_faces": (
+                "INT",
+                {
+                    "default": 10000,
+                    "min": 0,
+                    "max": 2000000,
+                    "step": 1000,
+                    "advanced": True,
+                    "tooltip": "Caps faces before CPU rasterization. Set 0 to disable for small meshes only.",
+                },
+            ),
             "camera_mode": (CAMERA_MODES, {"default": CameraMode.ORTHOGRAPHIC.value}),
             "front": ("BOOLEAN", {"default": True}),
             "back": ("BOOLEAN", {"default": True}),
@@ -375,6 +403,15 @@ if COMFY_API_AVAILABLE:
                 inputs=[
                     _model_input(),
                     IO.Int.Input("resolution", default=512, min=64, max=4096, step=64),
+                    IO.Int.Input(
+                        "max_faces",
+                        default=10000,
+                        min=0,
+                        max=2000000,
+                        step=1000,
+                        advanced=True,
+                        tooltip="Caps faces before CPU rasterization. Set 0 to disable for small meshes only.",
+                    ),
                     IO.Combo.Input("camera_mode", options=CAMERA_MODES, default=CameraMode.ORTHOGRAPHIC.value),
                     IO.Boolean.Input("front", default=True, label_on="render", label_off="skip"),
                     IO.Boolean.Input("back", default=True, label_on="render", label_off="skip"),
@@ -400,6 +437,7 @@ if COMFY_API_AVAILABLE:
             cls,
             model,
             resolution: int = 512,
+            max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             front: bool = True,
             back: bool = True,
@@ -417,6 +455,7 @@ if COMFY_API_AVAILABLE:
             images, names = _render(
                 model=model,
                 resolution=resolution,
+                max_faces=max_faces,
                 camera_mode=camera_mode,
                 front=front,
                 back=back,
@@ -461,6 +500,7 @@ else:
             self,
             model,
             resolution: int = 512,
+            max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
             front: bool = True,
             back: bool = True,
@@ -478,6 +518,7 @@ else:
             return _render(
                 model=model,
                 resolution=resolution,
+                max_faces=max_faces,
                 camera_mode=camera_mode,
                 front=front,
                 back=back,

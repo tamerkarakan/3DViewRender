@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from renderer import CameraMode, MeshBatchItem, MeshRenderer, RenderSettings, parse_color, selected_view_names
-from nodes import _file_type_from_model, _mesh_batch_items
+from nodes import _file_type_from_model, _limit_faces, _mesh_batch_items
 
 
 def make_box(width=1.0, height=0.6, depth=0.3):
@@ -124,6 +124,15 @@ class MeshRendererTests(unittest.TestCase):
         fake_file = type("FakeFile3D", (), {})()
         fake_file.format = "glb"
         self.assertEqual(_file_type_from_model(fake_file), "glb")
+
+    def test_face_limit_downsamples_before_rasterization(self):
+        faces = np.arange(30, dtype=np.int64).reshape(10, 3)
+        item = MeshBatchItem(vertices=np.zeros((30, 3), dtype=np.float32), faces=faces)
+
+        limited = _limit_faces(item, max_faces=4)
+
+        self.assertEqual(limited.faces.shape, (4, 3))
+        np.testing.assert_array_equal(limited.faces, faces[[0, 2, 5, 7]])
 
     @unittest.skipUnless(importlib.util.find_spec("trimesh"), "trimesh is not installed")
     def test_accepts_string_model_path(self):
