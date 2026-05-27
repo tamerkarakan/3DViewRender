@@ -27,7 +27,7 @@ class RenderSettings:
     width: int = 512
     height: int = 512
     camera_mode: CameraMode = CameraMode.ORTHOGRAPHIC
-    up_axis: str = "z_up"
+    up_axis: str = "+Z"
     background_color: tuple[float, float, float] = (0.0, 0.0, 0.0)
     mesh_color: tuple[float, float, float] = (0.82, 0.84, 0.88)
     fov_degrees: float = 45.0
@@ -66,6 +66,14 @@ Y_UP_VIEW_POSES = {
     "top": CameraPose("top", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
     "bottom": CameraPose("bottom", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
 }
+NEGATIVE_Y_UP_VIEW_POSES = {
+    "front": CameraPose("front", np.array([0.0, 0.0, -1.0]), np.array([0.0, -1.0, 0.0])),
+    "back": CameraPose("back", np.array([0.0, 0.0, 1.0]), np.array([0.0, -1.0, 0.0])),
+    "left": CameraPose("left", np.array([-1.0, 0.0, 0.0]), np.array([0.0, -1.0, 0.0])),
+    "right": CameraPose("right", np.array([1.0, 0.0, 0.0]), np.array([0.0, -1.0, 0.0])),
+    "top": CameraPose("top", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+    "bottom": CameraPose("bottom", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
+}
 Z_UP_VIEW_POSES = {
     "front": CameraPose("front", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
     "back": CameraPose("back", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])),
@@ -74,16 +82,65 @@ Z_UP_VIEW_POSES = {
     "top": CameraPose("top", np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])),
     "bottom": CameraPose("bottom", np.array([0.0, 0.0, -1.0]), np.array([0.0, 1.0, 0.0])),
 }
+NEGATIVE_Z_UP_VIEW_POSES = {
+    "front": CameraPose("front", np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
+    "back": CameraPose("back", np.array([0.0, -1.0, 0.0]), np.array([0.0, 0.0, -1.0])),
+    "left": CameraPose("left", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 0.0, -1.0])),
+    "right": CameraPose("right", np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, -1.0])),
+    "top": CameraPose("top", np.array([0.0, 0.0, -1.0]), np.array([0.0, -1.0, 0.0])),
+    "bottom": CameraPose("bottom", np.array([0.0, 0.0, 1.0]), np.array([0.0, -1.0, 0.0])),
+}
+X_UP_VIEW_POSES = {
+    "front": CameraPose("front", np.array([0.0, 0.0, -1.0]), np.array([1.0, 0.0, 0.0])),
+    "back": CameraPose("back", np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0])),
+    "left": CameraPose("left", np.array([0.0, -1.0, 0.0]), np.array([1.0, 0.0, 0.0])),
+    "right": CameraPose("right", np.array([0.0, 1.0, 0.0]), np.array([1.0, 0.0, 0.0])),
+    "top": CameraPose("top", np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+    "bottom": CameraPose("bottom", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 0.0, -1.0])),
+}
+NEGATIVE_X_UP_VIEW_POSES = {
+    "front": CameraPose("front", np.array([0.0, 0.0, 1.0]), np.array([-1.0, 0.0, 0.0])),
+    "back": CameraPose("back", np.array([0.0, 0.0, -1.0]), np.array([-1.0, 0.0, 0.0])),
+    "left": CameraPose("left", np.array([0.0, -1.0, 0.0]), np.array([-1.0, 0.0, 0.0])),
+    "right": CameraPose("right", np.array([0.0, 1.0, 0.0]), np.array([-1.0, 0.0, 0.0])),
+    "top": CameraPose("top", np.array([-1.0, 0.0, 0.0]), np.array([0.0, 0.0, -1.0])),
+    "bottom": CameraPose("bottom", np.array([1.0, 0.0, 0.0]), np.array([0.0, 0.0, 1.0])),
+}
+UP_AXIS_VIEW_POSES = {
+    "+Z": Z_UP_VIEW_POSES,
+    "-Z": NEGATIVE_Z_UP_VIEW_POSES,
+    "+Y": Y_UP_VIEW_POSES,
+    "-Y": NEGATIVE_Y_UP_VIEW_POSES,
+    "+X": X_UP_VIEW_POSES,
+    "-X": NEGATIVE_X_UP_VIEW_POSES,
+}
 VIEW_POSES = Y_UP_VIEW_POSES
 
 
-def view_pose(view: str, up_axis: str = "z_up") -> CameraPose:
-    if up_axis == "z_up":
-        poses = Z_UP_VIEW_POSES
-    elif up_axis == "y_up":
-        poses = Y_UP_VIEW_POSES
-    else:
+def canonical_up_axis(up_axis: str) -> str:
+    aliases = {
+        "z_up": "+Z",
+        "+z": "+Z",
+        "z": "+Z",
+        "-z": "-Z",
+        "y_up": "+Y",
+        "+y": "+Y",
+        "y": "+Y",
+        "-y": "-Y",
+        "x_up": "+X",
+        "+x": "+X",
+        "x": "+X",
+        "-x": "-X",
+    }
+    text = str(up_axis).strip()
+    canonical = aliases.get(text.lower(), text.upper())
+    if canonical not in UP_AXIS_VIEW_POSES:
         raise ValueError(f"Unknown up axis: {up_axis}")
+    return canonical
+
+
+def view_pose(view: str, up_axis: str = "+Z") -> CameraPose:
+    poses = UP_AXIS_VIEW_POSES[canonical_up_axis(up_axis)]
     if view not in poses:
         raise ValueError(f"Unknown view: {view}")
     return poses[view]
@@ -333,6 +390,18 @@ class MeshRenderer:
 
 
 class ContactSheetBuilder:
+    def label_images(
+        self,
+        images: Sequence[np.ndarray],
+        labels: Sequence[str],
+        settings: ContactSheetSettings | None = None,
+    ) -> list[np.ndarray]:
+        settings = settings or ContactSheetSettings()
+        prepared = [self._prepare_image(image) for image in images]
+        if not settings.label_views:
+            return prepared
+        return [self._draw_label(image, str(label), settings) for image, label in zip(prepared, labels)]
+
     def build(
         self,
         images: Sequence[np.ndarray],
@@ -394,19 +463,52 @@ class ContactSheetBuilder:
 
         pil = Image.fromarray((sheet * 255.0).round().astype(np.uint8))
         draw = ImageDraw.Draw(pil)
-        font = ImageFont.load_default()
+        font = self._font(ImageFont, tile_width, tile_height)
         text_color = tuple(int(_clamp(channel) * 255) for channel in settings.label_color)
         bg_color = tuple(int(_clamp(channel) * 255) for channel in settings.label_background)
         for index, label in enumerate(labels):
             row = index // cols
             col = index % cols
-            x = col * tile_width + 6
-            y = row * tile_height + 6
+            padding = self._padding(tile_width, tile_height)
+            x = col * tile_width + padding
+            y = row * tile_height + padding
             text = str(label)
             bbox = draw.textbbox((x, y), text, font=font)
-            draw.rectangle((bbox[0] - 3, bbox[1] - 2, bbox[2] + 3, bbox[3] + 2), fill=bg_color)
+            margin = max(3, padding // 2)
+            draw.rectangle((bbox[0] - margin, bbox[1] - margin, bbox[2] + margin, bbox[3] + margin), fill=bg_color)
             draw.text((x, y), text, fill=text_color, font=font)
         return np.asarray(pil, dtype=np.float32) / 255.0
+
+    def _draw_label(self, image: np.ndarray, label: str, settings: ContactSheetSettings) -> np.ndarray:
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except Exception as exc:
+            raise RuntimeError("Pillow is required to draw image labels.") from exc
+
+        height, width = image.shape[:2]
+        pil = Image.fromarray((image * 255.0).round().astype(np.uint8))
+        draw = ImageDraw.Draw(pil)
+        font = self._font(ImageFont, width, height)
+        padding = self._padding(width, height)
+        text_color = tuple(int(_clamp(channel) * 255) for channel in settings.label_color)
+        bg_color = tuple(int(_clamp(channel) * 255) for channel in settings.label_background)
+        bbox = draw.textbbox((padding, padding), label, font=font)
+        margin = max(3, padding // 2)
+        draw.rectangle((bbox[0] - margin, bbox[1] - margin, bbox[2] + margin, bbox[3] + margin), fill=bg_color)
+        draw.text((padding, padding), label, fill=text_color, font=font)
+        return np.asarray(pil, dtype=np.float32) / 255.0
+
+    def _font(self, ImageFont, width: int, height: int):
+        size = max(14, min(48, min(width, height) // 12))
+        for name in ("DejaVuSans.ttf", "arial.ttf"):
+            try:
+                return ImageFont.truetype(name, size=size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    def _padding(self, width: int, height: int) -> int:
+        return max(6, min(width, height) // 48)
 
 
 class NvdiffrastRenderer:

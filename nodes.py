@@ -22,6 +22,7 @@ try:
         NvdiffrastRenderer,
         RenderSettings,
         VIEW_ORDER,
+        canonical_up_axis,
         parse_color,
         selected_view_names,
     )
@@ -35,6 +36,7 @@ except ImportError:  # Allows running tests from this directory without package 
         NvdiffrastRenderer,
         RenderSettings,
         VIEW_ORDER,
+        canonical_up_axis,
         parse_color,
         selected_view_names,
     )
@@ -66,7 +68,7 @@ DISPLAY_NAME = "3D View Render: Six Sides"
 CATEGORY = "3d/render"
 CAMERA_MODES = [CameraMode.ORTHOGRAPHIC.value, CameraMode.PERSPECTIVE.value]
 RENDERER_BACKENDS = ["cpu_preview", "f3d_optional", "blender_optional", "nvdiffrast_optional"]
-UP_AXES = ["z_up", "y_up"]
+UP_AXES = ["+Z", "-Z", "+Y", "-Y", "+X", "-X"]
 MATRIX_LAYOUTS = ["3x2", "2x3", "6x1", "1x6", "auto"]
 MODEL_INPUT_TYPES = (
     "MESH",
@@ -96,13 +98,12 @@ def _build_settings(
     shading: bool,
 ) -> RenderSettings:
     mode = CameraMode(camera_mode)
-    if up_axis not in UP_AXES:
-        raise ValueError(f"Unknown up axis: {up_axis}")
+    normalized_up_axis = canonical_up_axis(up_axis)
     base = RenderSettings(
         width=int(resolution),
         height=int(resolution),
         camera_mode=mode,
-        up_axis=up_axis,
+        up_axis=normalized_up_axis,
         fov_degrees=float(fov_degrees),
         orthographic_scale=float(orthographic_scale),
         camera_distance=float(camera_distance),
@@ -189,12 +190,10 @@ def _render(
     if not images:
         raise ValueError("No renderable mesh items were found.")
 
-    labels = [_view_display_name(batch_index, batch_count, view, settings.up_axis) for batch_index, view in label_views]
-    save_names = [_view_file_stem(batch_index, batch_count, view) for batch_index, view in label_views]
+    labels = [_view_output_name(batch_index, batch_count, view) for batch_index, view in label_views]
     return _finalize_render(
         images=images,
         labels=labels,
-        save_names=save_names,
         renderer_backend=renderer_backend,
         settings=settings,
         views=views,
@@ -239,12 +238,10 @@ def _render_external(
                 label_views.append((batch_index, rendered.name))
         if not images:
             raise ValueError("No renderable mesh items were found.")
-        labels = [_view_display_name(batch_index, batch_count, view, settings.up_axis) for batch_index, view in label_views]
-        save_names = [_view_file_stem(batch_index, batch_count, view) for batch_index, view in label_views]
+        labels = [_view_output_name(batch_index, batch_count, view) for batch_index, view in label_views]
         return _finalize_render(
             images=images,
             labels=labels,
-            save_names=save_names,
             renderer_backend=renderer_backend,
             settings=settings,
             views=views,
@@ -264,7 +261,6 @@ def _finalize_render(
     *,
     images: list[np.ndarray],
     labels: list[str],
-    save_names: list[str],
     renderer_backend: str,
     settings: RenderSettings,
     views: list[str],
@@ -281,10 +277,13 @@ def _finalize_render(
     except Exception as exc:
         raise RuntimeError("ComfyUI torch runtime is required to return IMAGE tensors.") from exc
 
-    contact_sheet = ContactSheetBuilder().build(
+    sheet_settings = ContactSheetSettings(layout=matrix_layout, label_views=label_matrix)
+    sheet_builder = ContactSheetBuilder()
+    display_images = sheet_builder.label_images(images, labels, sheet_settings)
+    contact_sheet = sheet_builder.build(
         images,
         labels,
-        ContactSheetSettings(layout=matrix_layout, label_views=label_matrix),
+        sheet_settings,
     )
     render_info = _format_render_info(
         renderer_backend=renderer_backend,
@@ -298,14 +297,14 @@ def _finalize_render(
         filename_prefix=filename_prefix,
     )
     saved_images = _save_render_outputs(
-        images,
+        display_images,
+        labels,
         contact_sheet,
-        save_names,
         save_to_output=save_to_output,
         filename_prefix=filename_prefix,
     )
     return (
-        torch.from_numpy(np.stack(images, axis=0)).float(),
+        torch.from_numpy(np.stack(display_images, axis=0)).float(),
         "\n".join(labels),
         render_info,
         torch.from_numpy(contact_sheet[None, ...]).float(),
@@ -338,7 +337,6 @@ def _format_render_info(
         f"up_axis={settings.up_axis}",
         f"resolution={settings.width}x{settings.height}",
         f"views={','.join(views)}",
-        f"axes={','.join(f'{view}:{_view_axis_label(view, settings.up_axis)}' for view in views)}",
     ]
     if matrix_layout is not None:
         lines.append(f"matrix_layout={matrix_layout}")
@@ -368,39 +366,7 @@ def _render_ui(render_info: str, saved_images: list[dict[str, str]]) -> dict[str
     return ui
 
 
-def _view_axis_label(view: str, up_axis: str) -> str:
-    axes_by_up = {
-        "z_up": {
-            "front": "-Y",
-            "back": "+Y",
-            "left": "-X",
-            "right": "+X",
-            "top": "+Z",
-            "bottom": "-Z",
-        },
-        "y_up": {
-            "front": "+Z",
-            "back": "-Z",
-            "left": "-X",
-            "right": "+X",
-            "top": "+Y",
-            "bottom": "-Y",
-        },
-    }
-    try:
-        return axes_by_up[up_axis][view]
-    except KeyError as exc:
-        raise ValueError(f"Unknown view/up axis combination: {view}/{up_axis}") from exc
-
-
-def _view_display_name(batch_index: int, batch_count: int, view: str, up_axis: str) -> str:
-    label = f"{view} ({_view_axis_label(view, up_axis)})"
-    if batch_count <= 1:
-        return label
-    return f"mesh{batch_index}_{label}"
-
-
-def _view_file_stem(batch_index: int, batch_count: int, view: str) -> str:
+def _view_output_name(batch_index: int, batch_count: int, view: str) -> str:
     if batch_count <= 1:
         return view
     return f"mesh{batch_index}_{view}"
@@ -415,8 +381,8 @@ def _safe_filename_piece(value: str) -> str:
 
 def _save_render_outputs(
     images: list[np.ndarray],
+    labels: list[str],
     contact_sheet: np.ndarray,
-    save_names: list[str],
     *,
     save_to_output: bool,
     filename_prefix: str,
@@ -433,8 +399,8 @@ def _save_render_outputs(
     output_dir = folder_paths.get_output_directory()
     prefix = filename_prefix.strip() or "3DViewRender/render"
     results = []
-    for image, save_name in zip(images, save_names):
-        results.append(_save_png(Image, folder_paths, os, image, f"{prefix}_{_safe_filename_piece(save_name)}", output_dir))
+    for image, label in zip(images, labels):
+        results.append(_save_png(Image, folder_paths, os, image, f"{prefix}_{_safe_filename_piece(label)}", output_dir))
     results.append(_save_png(Image, folder_paths, os, contact_sheet, f"{prefix}_matrix", output_dir))
     return results
 
@@ -716,8 +682,8 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
             "up_axis": (
                 UP_AXES,
                 {
-                    "default": "z_up",
-                    "tooltip": "Model vertical axis. z_up keeps side views upright for most GLB/OBJ assets; use y_up for Y-up models.",
+                    "default": "+Z",
+                    "tooltip": "Model vertical axis. Choose +Z/-Z/+Y/-Y/+X/-X to match the asset's up direction.",
                 },
             ),
             "matrix_layout": (
@@ -731,7 +697,7 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
                 "BOOLEAN",
                 {
                     "default": True,
-                    "tooltip": "Draw each view name and axis direction in the top-left corner of the matrix image using Pillow.",
+                    "tooltip": "Draw each view name in the top-left corner of side images and the matrix image using Pillow.",
                 },
             ),
             "save_to_output": (
@@ -834,8 +800,8 @@ if COMFY_API_AVAILABLE:
                     IO.Combo.Input(
                         "up_axis",
                         options=UP_AXES,
-                        default="z_up",
-                        tooltip="Model vertical axis. z_up keeps side views upright for most GLB/OBJ assets; use y_up for Y-up models.",
+                        default="+Z",
+                        tooltip="Model vertical axis. Choose +Z/-Z/+Y/-Y/+X/-X to match the asset's up direction.",
                     ),
                     IO.Combo.Input(
                         "matrix_layout",
@@ -846,7 +812,7 @@ if COMFY_API_AVAILABLE:
                     IO.Boolean.Input(
                         "label_matrix",
                         default=True,
-                        tooltip="Draw each view name and axis direction in the top-left corner of the matrix image using Pillow.",
+                        tooltip="Draw each view name in the top-left corner of side images and the matrix image using Pillow.",
                     ),
                     IO.Boolean.Input(
                         "save_to_output",
@@ -890,7 +856,7 @@ if COMFY_API_AVAILABLE:
             blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
-            up_axis: str = "z_up",
+            up_axis: str = "+Z",
             matrix_layout: str = "3x2",
             label_matrix: bool = True,
             save_to_output: bool = True,
@@ -970,7 +936,7 @@ else:
             blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
-            up_axis: str = "z_up",
+            up_axis: str = "+Z",
             matrix_layout: str = "3x2",
             label_matrix: bool = True,
             save_to_output: bool = True,

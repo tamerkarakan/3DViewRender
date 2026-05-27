@@ -15,6 +15,7 @@ from renderer import (
     MeshBatchItem,
     MeshRenderer,
     RenderSettings,
+    canonical_up_axis,
     parse_color,
     selected_view_names,
     view_pose,
@@ -133,6 +134,25 @@ class MeshRendererTests(unittest.TestCase):
         self.assertEqual(sheet.shape, (16, 24, 3))
         self.assertGreater(float(sheet[:8, :8].sum()), 0.0)
         self.assertGreater(float(sheet[8:16, 16:24].sum()), 0.0)
+
+    def test_label_images_draws_visible_side_text(self):
+        image = np.zeros((96, 96, 3), dtype=np.float32)
+        labeled = ContactSheetBuilder().label_images(
+            [image],
+            ["front"],
+            ContactSheetSettings(layout="3x2", label_views=True),
+        )[0]
+
+        self.assertEqual(labeled.shape, image.shape)
+        self.assertGreater(float(labeled[:32, :64].sum()), 1.0)
+
+    def test_up_axis_menu_values_and_legacy_aliases_resolve_to_view_poses(self):
+        self.assertEqual(canonical_up_axis("z_up"), "+Z")
+        self.assertEqual(canonical_up_axis("y_up"), "+Y")
+        for axis in ("+Z", "-Z", "+Y", "-Y", "+X", "-X"):
+            pose = view_pose("top", axis)
+            self.assertTrue(np.all(np.isfinite(pose.direction)))
+            self.assertGreater(float(np.linalg.norm(pose.up)), 0.0)
 
     def test_z_up_side_view_keeps_z_axis_upright(self):
         renderer = MeshRenderer()
