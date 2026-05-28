@@ -693,14 +693,14 @@ def _legacy_inputs() -> dict[str, dict[str, Any]]:
             "up_axis": (
                 UP_AXES,
                 {
-                    "default": "+Z",
+                    "default": "-Y",
                     "tooltip": "Model vertical axis. Choose +Z/-Z/+Y/-Y/+X/-X to match the asset's up direction.",
                 },
             ),
             "front_axis": (
                 FRONT_AXES,
                 {
-                    "default": "-Y",
+                    "default": "+Z",
                     "tooltip": "Model front direction. The UI removes axes parallel to up_axis; backend validation rejects invalid pairs.",
                 },
             ),
@@ -818,13 +818,13 @@ if COMFY_API_AVAILABLE:
                     IO.Combo.Input(
                         "up_axis",
                         options=UP_AXES,
-                        default="+Z",
+                        default="-Y",
                         tooltip="Model vertical axis. Choose +Z/-Z/+Y/-Y/+X/-X to match the asset's up direction.",
                     ),
                     IO.Combo.Input(
                         "front_axis",
                         options=FRONT_AXES,
-                        default="-Y",
+                        default="+Z",
                         tooltip="Model front direction. The UI removes axes parallel to up_axis; backend validation rejects invalid pairs.",
                     ),
                     IO.Combo.Input(
@@ -880,8 +880,8 @@ if COMFY_API_AVAILABLE:
             blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
-            up_axis: str = "+Z",
-            front_axis: str = "-Y",
+            up_axis: str = "-Y",
+            front_axis: str = "+Z",
             matrix_layout: str = "3x2",
             label_matrix: bool = True,
             save_to_output: bool = True,
@@ -962,8 +962,8 @@ else:
             blender_path: str = "",
             max_faces: int = 10000,
             camera_mode: str = CameraMode.ORTHOGRAPHIC.value,
-            up_axis: str = "+Z",
-            front_axis: str = "-Y",
+            up_axis: str = "-Y",
+            front_axis: str = "+Z",
             matrix_layout: str = "3x2",
             label_matrix: bool = True,
             save_to_output: bool = True,

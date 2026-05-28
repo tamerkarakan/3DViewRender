@@ -42,9 +42,9 @@ class UiContractTests(unittest.TestCase):
         self.assertEqual(required["camera_mode"][0], ["orthographic", "perspective"])
         self.assertEqual(required["camera_mode"][1]["default"], "orthographic")
         self.assertEqual(required["up_axis"][0], ["+Z", "-Z", "+Y", "-Y", "+X", "-X"])
-        self.assertEqual(required["up_axis"][1]["default"], "+Z")
+        self.assertEqual(required["up_axis"][1]["default"], "-Y")
         self.assertEqual(required["front_axis"][0], ["+Z", "-Z", "+Y", "-Y", "+X", "-X"])
-        self.assertEqual(required["front_axis"][1]["default"], "-Y")
+        self.assertEqual(required["front_axis"][1]["default"], "+Z")
         self.assertEqual(required["matrix_layout"][0], ["3x2", "2x3", "6x1", "1x6", "auto"])
         self.assertEqual(required["matrix_layout"][1]["default"], "3x2")
         self.assertEqual(required["label_matrix"][1]["default"], True)
@@ -60,7 +60,7 @@ class UiContractTests(unittest.TestCase):
     def test_render_info_names_backend_engine_and_orientation(self):
         info = nodes._format_render_info(
             renderer_backend="cpu_preview",
-            settings=nodes.RenderSettings(width=128, height=128, up_axis="+Z"),
+            settings=nodes.RenderSettings(width=128, height=128),
             views=["right"],
             max_faces=10000,
             matrix_layout="3x2",
@@ -70,8 +70,8 @@ class UiContractTests(unittest.TestCase):
 
         self.assertIn("renderer_backend=cpu_preview", info)
         self.assertIn("renderer_engine=MeshRenderer CPU rasterizer", info)
-        self.assertIn("up_axis=+Z", info)
-        self.assertIn("front_axis=-Y", info)
+        self.assertIn("up_axis=-Y", info)
+        self.assertIn("front_axis=+Z", info)
         self.assertIn("views=right", info)
         self.assertIn("matrix_layout=3x2", info)
         self.assertIn("save_to_output=true", info)

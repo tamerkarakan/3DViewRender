@@ -113,7 +113,8 @@ class V3EntrypointContractTests(unittest.TestCase):
 
             def fake_render(**kwargs):
                 assert kwargs["renderer_backend"] == "f3d_optional"
-                assert kwargs["front_axis"] == "-Y"
+                assert kwargs["up_axis"] == "-Y"
+                assert kwargs["front_axis"] == "+Z"
                 return "images", "right", "renderer_backend=cpu_preview", "contact_sheet", {"text": ["renderer_backend=cpu_preview"]}
 
             nodes._render = fake_render

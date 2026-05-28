@@ -159,6 +159,7 @@ class MeshRendererTests(unittest.TestCase):
     def test_front_axis_excludes_parallel_up_axis_pairs(self):
         self.assertEqual(valid_front_axes("+Y"), ["+Z", "-Z", "+X", "-X"])
         self.assertEqual(resolve_front_axis("+Z", None), "-Y")
+        self.assertEqual(resolve_front_axis("-Y", None), "+Z")
         self.assertEqual(resolve_front_axis("+Y", "auto"), "+Z")
         with self.assertRaisesRegex(ValueError, "front_axis -Y is invalid for up_axis \\+Y"):
             resolve_front_axis("+Y", "-Y")

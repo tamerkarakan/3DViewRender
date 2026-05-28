@@ -14,8 +14,8 @@ Inputs:
 - `resolution`: square output image size
 - `renderer_backend`: `f3d_optional` by default, or `cpu_preview`, `blender_optional`, `nvdiffrast_optional`
 - `camera_mode`: `orthographic` or `perspective`
-- `up_axis`: model vertical axis, `+Z` by default; choose `+Z`, `-Z`, `+Y`, `-Y`, `+X`, or `-X`
-- `front_axis`: model front direction, `-Y` by default; the frontend removes choices parallel to `up_axis`, and the backend rejects invalid workflow/API pairs
+- `up_axis`: model vertical axis, `-Y` by default; choose `+Z`, `-Z`, `+Y`, `-Y`, `+X`, or `-X`
+- `front_axis`: model front direction, `+Z` by default; the frontend removes choices parallel to `up_axis`, and the backend rejects invalid workflow/API pairs
 - `matrix_layout`: single-image matrix layout, `3x2` by default for six sides
 - `label_matrix`: draw each side name in the top-left corner of side images and matrix tiles using Pillow
 - `save_to_output`: save side PNGs plus the matrix PNG directly into ComfyUI's output folder

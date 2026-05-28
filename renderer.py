@@ -27,8 +27,8 @@ class RenderSettings:
     width: int = 512
     height: int = 512
     camera_mode: CameraMode = CameraMode.ORTHOGRAPHIC
-    up_axis: str = "+Z"
-    front_axis: str | None = None
+    up_axis: str = "-Y"
+    front_axis: str | None = "+Z"
     background_color: tuple[float, float, float] = (0.0, 0.0, 0.0)
     mesh_color: tuple[float, float, float] = (0.82, 0.84, 0.88)
     fov_degrees: float = 45.0
@@ -80,7 +80,7 @@ DEFAULT_FRONT_AXIS_BY_UP_AXIS = {
     "+Z": "-Y",
     "-Z": "+Y",
     "+Y": "+Z",
-    "-Y": "-Z",
+    "-Y": "+Z",
     "+X": "-Z",
     "-X": "+Z",
 }
